@@ -1,0 +1,8 @@
+// run the docker compose 
+open the docker desktop and then run 
+docker compose up -d
+docker compose ps
+apps/api/venv/bin/uvicorn apps.api.main:app --reload --port 8765
+
+
+apps/api/venv/bin/alembic upgrade head

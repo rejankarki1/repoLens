@@ -1,0 +1,212 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 810" width="1560" height="810" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<style>
+.title{font-size:15px;font-weight:700;fill:#fff}
+.title2{font-size:15px;font-weight:700;fill:#0f172a}
+.col{font-size:13px;fill:#0f172a}
+.typ{font-size:11px;fill:#64748b}
+.tag{font-size:10.5px;font-weight:700;fill:#b45309}
+.card{font-size:12px;font-weight:700;fill:#1e293b}
+.note{font-size:12px;fill:#475569;font-style:italic}
+.h{font-size:22px;font-weight:700;fill:#0f172a}
+</style>
+<rect width="1560" height="810" fill="#ffffff"/>
+<text x="40" y="36" class="h">RepoLens ERD — Phase 2.3 design (ORM approved, migration pending)</text>
+<path d="M 320,127 L 420,127" fill="none" stroke="#475569" stroke-width="1.6"/>
+<text x="326" y="121" class="card">1</text>
+<text x="386" y="121" class="card">0..N</text>
+<path d="M 700,127 L 800,127" fill="none" stroke="#475569" stroke-width="1.6"/>
+<text x="704" y="121" class="card">0..1</text>
+<text x="766" y="121" class="card">0..N</text>
+<path d="M 1080,127 L 1220,127" fill="none" stroke="#475569" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="1086" y="121" class="card">1</text>
+<text x="1186" y="121" class="card">0..N</text>
+<path d="M 100,168 L 100,470" fill="none" stroke="#475569" stroke-width="1.6"/>
+<text x="106" y="184" class="card">1</text>
+<text x="106" y="464" class="card">0..N</text>
+<path d="M 100,622 L 100,700" fill="none" stroke="#475569" stroke-width="1.6"/>
+<text x="106" y="638" class="card">1</text>
+<text x="106" y="694" class="card">0..N</text>
+<path d="M 1040,344 L 1040,690 L 370,690 L 370,545 L 320,545" fill="none" stroke="#475569" stroke-width="1.6"/>
+<text x="1046" y="360" class="card">0..1</text>
+<text x="328" y="539" class="card">0..N</text>
+<path d="M 260,168 L 260,300 L 560,300 L 560,470" fill="none" stroke="#475569" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="266" y="184" class="card">1</text>
+<text x="566" y="464" class="card">0..N</text>
+<path d="M 900,344 L 900,520 L 700,520" fill="none" stroke="#475569" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="906" y="360" class="card">1</text>
+<text x="708" y="514" class="card">0..N</text>
+<g><rect x="40" y="60" width="280" height="108" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<path d="M40,94 V66 Q40,60 46,60 H314 Q320,60 320,66 V94 Z" fill="#2563eb"/>
+<text x="52" y="82" class="title">users</text>
+<text x="50" y="113" class="tag">PK</text>
+<text x="102" y="113" class="col">id</text>
+<text x="310" y="113" class="typ" text-anchor="end">int</text>
+<text x="50" y="135" class="tag">UQ</text>
+<text x="102" y="135" class="col">email</text>
+<text x="310" y="135" class="typ" text-anchor="end">varchar(320)</text>
+<text x="50" y="157" class="tag"></text>
+<text x="102" y="157" class="col">created_at</text>
+<text x="310" y="157" class="typ" text-anchor="end">timestamptz</text>
+</g>
+<g><rect x="420" y="60" width="280" height="130" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<path d="M420,94 V66 Q420,60 426,60 H694 Q700,60 700,66 V94 Z" fill="#2563eb"/>
+<text x="432" y="82" class="title">github_accounts</text>
+<text x="430" y="113" class="tag">PK</text>
+<text x="482" y="113" class="col">id</text>
+<text x="690" y="113" class="typ" text-anchor="end">int</text>
+<text x="430" y="135" class="tag">FK</text>
+<text x="482" y="135" class="col">user_id</text>
+<text x="690" y="135" class="typ" text-anchor="end">int</text>
+<text x="430" y="157" class="tag">UQ</text>
+<text x="482" y="157" class="col">github_user_id</text>
+<text x="690" y="157" class="typ" text-anchor="end">bigint</text>
+<text x="430" y="179" class="tag"></text>
+<text x="482" y="179" class="col">login</text>
+<text x="690" y="179" class="typ" text-anchor="end">varchar(255)</text>
+</g>
+<g><rect x="800" y="60" width="280" height="284" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<path d="M800,94 V66 Q800,60 806,60 H1074 Q1080,60 1080,66 V94 Z" fill="#2563eb"/>
+<text x="812" y="82" class="title">repositories</text>
+<text x="810" y="113" class="tag">PK</text>
+<text x="862" y="113" class="col">id</text>
+<text x="1070" y="113" class="typ" text-anchor="end">int</text>
+<text x="810" y="135" class="tag">UQ</text>
+<text x="862" y="135" class="col">github_repo_id</text>
+<text x="1070" y="135" class="typ" text-anchor="end">bigint</text>
+<text x="810" y="157" class="tag">FK</text>
+<text x="862" y="157" class="col">github_account_id</text>
+<text x="1070" y="157" class="typ" text-anchor="end">int, null</text>
+<text x="810" y="179" class="tag"></text>
+<text x="862" y="179" class="col">full_name</text>
+<text x="1070" y="179" class="typ" text-anchor="end">varchar(512)</text>
+<text x="810" y="201" class="tag"></text>
+<text x="862" y="201" class="col">default_branch</text>
+<text x="1070" y="201" class="typ" text-anchor="end">varchar(255)</text>
+<text x="810" y="223" class="tag"></text>
+<text x="862" y="223" class="col">created_at</text>
+<text x="1070" y="223" class="typ" text-anchor="end">timestamptz</text>
+<rect x="802" y="230" width="276" height="22" fill="#fef3c7"/>
+<text x="810" y="245" class="tag"></text>
+<text x="862" y="245" class="col">last_ingested_commit_sha</text>
+<text x="1070" y="245" class="typ" text-anchor="end">varchar(40), null</text>
+<rect x="802" y="252" width="276" height="22" fill="#fef3c7"/>
+<text x="810" y="267" class="tag"></text>
+<text x="862" y="267" class="col">ingestion_status</text>
+<text x="1070" y="267" class="typ" text-anchor="end">varchar(20), dflt pending</text>
+<rect x="802" y="274" width="276" height="22" fill="#fef3c7"/>
+<text x="810" y="289" class="tag"></text>
+<text x="862" y="289" class="col">ingestion_truncated</text>
+<text x="1070" y="289" class="typ" text-anchor="end">boolean, dflt false</text>
+<rect x="802" y="296" width="276" height="22" fill="#fef3c7"/>
+<text x="810" y="311" class="tag"></text>
+<text x="862" y="311" class="col">ingestion_error</text>
+<text x="1070" y="311" class="typ" text-anchor="end">text, null</text>
+<rect x="802" y="318" width="276" height="22" fill="#fef3c7"/>
+<text x="810" y="333" class="tag"></text>
+<text x="862" y="333" class="col">last_ingested_at</text>
+<text x="1070" y="333" class="typ" text-anchor="end">timestamptz, null</text>
+</g>
+<g><rect x="1220" y="60" width="300" height="284" rx="6" fill="#ffffff" stroke="#d97706" stroke-width="2" stroke-dasharray="8 5"/>
+<path d="M1220,94 V66 Q1220,60 1226,60 H1514 Q1520,60 1520,66 V94 Z" fill="#d97706"/>
+<text x="1232" y="82" class="title">source_files  (not migrated)</text>
+<text x="1230" y="113" class="tag">PK</text>
+<text x="1282" y="113" class="col">id</text>
+<text x="1510" y="113" class="typ" text-anchor="end">int</text>
+<text x="1230" y="135" class="tag">FK</text>
+<text x="1282" y="135" class="col">repository_id</text>
+<text x="1510" y="135" class="typ" text-anchor="end">int</text>
+<text x="1230" y="157" class="tag"></text>
+<text x="1282" y="157" class="col">commit_sha</text>
+<text x="1510" y="157" class="typ" text-anchor="end">varchar(40)</text>
+<text x="1230" y="179" class="tag"></text>
+<text x="1282" y="179" class="col">path</text>
+<text x="1510" y="179" class="typ" text-anchor="end">text</text>
+<text x="1230" y="201" class="tag"></text>
+<text x="1282" y="201" class="col">language</text>
+<text x="1510" y="201" class="typ" text-anchor="end">varchar(64)</text>
+<text x="1230" y="223" class="tag"></text>
+<text x="1282" y="223" class="col">category</text>
+<text x="1510" y="223" class="typ" text-anchor="end">varchar(20)</text>
+<text x="1230" y="245" class="tag"></text>
+<text x="1282" y="245" class="col">content</text>
+<text x="1510" y="245" class="typ" text-anchor="end">text</text>
+<text x="1230" y="267" class="tag"></text>
+<text x="1282" y="267" class="col">content_hash</text>
+<text x="1510" y="267" class="typ" text-anchor="end">varchar(64)</text>
+<text x="1230" y="289" class="tag"></text>
+<text x="1282" y="289" class="col">size_bytes</text>
+<text x="1510" y="289" class="typ" text-anchor="end">int</text>
+<text x="1230" y="311" class="tag"></text>
+<text x="1282" y="311" class="col">line_count</text>
+<text x="1510" y="311" class="typ" text-anchor="end">int</text>
+<text x="1230" y="333" class="tag"></text>
+<text x="1282" y="333" class="col">created_at</text>
+<text x="1510" y="333" class="typ" text-anchor="end">timestamptz</text>
+</g>
+<g><rect x="40" y="470" width="280" height="152" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<path d="M40,504 V476 Q40,470 46,470 H314 Q320,470 320,476 V504 Z" fill="#2563eb"/>
+<text x="52" y="492" class="title">conversations</text>
+<text x="50" y="523" class="tag">PK</text>
+<text x="102" y="523" class="col">id</text>
+<text x="310" y="523" class="typ" text-anchor="end">int</text>
+<text x="50" y="545" class="tag">FK</text>
+<text x="102" y="545" class="col">user_id</text>
+<text x="310" y="545" class="typ" text-anchor="end">int</text>
+<text x="50" y="567" class="tag">FK</text>
+<text x="102" y="567" class="col">repository_id</text>
+<text x="310" y="567" class="typ" text-anchor="end">int, null</text>
+<text x="50" y="589" class="tag"></text>
+<text x="102" y="589" class="col">title</text>
+<text x="310" y="589" class="typ" text-anchor="end">varchar(255), null</text>
+<text x="50" y="611" class="tag"></text>
+<text x="102" y="611" class="col">created_at</text>
+<text x="310" y="611" class="typ" text-anchor="end">timestamptz</text>
+</g>
+<g><rect x="40" y="700" width="280" height="152" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<path d="M40,734 V706 Q40,700 46,700 H314 Q320,700 320,706 V734 Z" fill="#2563eb"/>
+<text x="52" y="722" class="title">messages</text>
+<text x="50" y="753" class="tag">PK</text>
+<text x="102" y="753" class="col">id</text>
+<text x="310" y="753" class="typ" text-anchor="end">int</text>
+<text x="50" y="775" class="tag">FK</text>
+<text x="102" y="775" class="col">conversation_id</text>
+<text x="310" y="775" class="typ" text-anchor="end">int</text>
+<text x="50" y="797" class="tag"></text>
+<text x="102" y="797" class="col">role</text>
+<text x="310" y="797" class="typ" text-anchor="end">varchar(20)</text>
+<text x="50" y="819" class="tag"></text>
+<text x="102" y="819" class="col">content</text>
+<text x="310" y="819" class="typ" text-anchor="end">text</text>
+<text x="50" y="841" class="tag"></text>
+<text x="102" y="841" class="col">created_at</text>
+<text x="310" y="841" class="typ" text-anchor="end">timestamptz</text>
+</g>
+<g><rect x="420" y="470" width="280" height="108" rx="6" fill="#ffffff" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5"/>
+<path d="M420,504 V476 Q420,470 426,470 H694 Q700,470 700,476 V504 Z" fill="#64748b"/>
+<text x="432" y="492" class="title">user_repositories  (planned)</text>
+<text x="430" y="523" class="tag">PK,FK</text>
+<text x="482" y="523" class="col">user_id</text>
+<text x="690" y="523" class="typ" text-anchor="end">int</text>
+<text x="430" y="545" class="tag">PK,FK</text>
+<text x="482" y="545" class="col">repository_id</text>
+<text x="690" y="545" class="typ" text-anchor="end">int</text>
+<text x="430" y="567" class="tag"></text>
+<text x="482" y="567" class="col">created_at</text>
+<text x="690" y="567" class="typ" text-anchor="end">timestamptz</text>
+</g>
+<text x="1220" y="400" class="note">UNIQUE (repository_id, commit_sha, path)</text>
+<text x="1220" y="420" class="note">FK repository_id → repositories.id ON DELETE CASCADE</text>
+<text x="1220" y="440" class="note">content = full source text (PostgreSQL TEXT)</text>
+<text x="1220" y="460" class="note">Latest snapshot only; enforced by the service.</text>
+<text x="420" y="640" class="note">PK (user_id, repository_id)</text>
+<text x="420" y="660" class="note">Per-user dashboard; repo data shared.</text>
+<rect x="1220" y="540" width="300" height="250" rx="6" fill="#f8fafc" stroke="#cbd5e1"/>
+<text x="1234" y="566" class="title2">Legend</text>
+<rect x="1234" y="580" width="34" height="18" rx="3" fill="#fff" stroke="#2563eb" stroke-width="2"/><text x="1280" y="594" class="col">Migrated table</text>
+<rect x="1234" y="608" width="34" height="18" rx="3" fill="#fff" stroke="#d97706" stroke-width="2" stroke-dasharray="5 3"/><text x="1280" y="622" class="col">ORM model, not yet migrated</text>
+<rect x="1234" y="636" width="34" height="18" rx="3" fill="#fff" stroke="#64748b" stroke-width="2" stroke-dasharray="5 3"/><text x="1280" y="650" class="col">Planned, no ORM model yet</text>
+<rect x="1234" y="664" width="34" height="18" rx="3" fill="#fef3c7" stroke="#d97706" stroke-width="2"/><text x="1280" y="678" class="col">ORM column, not yet migrated</text>
+<line x1="1234" y1="710" x2="1268" y2="710" stroke="#475569" stroke-width="1.6"/><text x="1280" y="714" class="col">Migrated relationship</text>
+<line x1="1234" y1="738" x2="1268" y2="738" stroke="#475569" stroke-width="1.6" stroke-dasharray="7 5"/><text x="1280" y="742" class="col">Not migrated / planned</text>
+<text x="1234" y="774" class="typ">PK primary · FK foreign · UQ unique · 0..N = zero or many</text>
+</svg>

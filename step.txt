@@ -1,0 +1,74 @@
+this is for the step of the project 
+
+phase one 
+
+step 1 
+check 
+node -v 
+npm -v
+git -v
+python3 --version 
+docker --version 
+
+step 2 
+create the basic folder structure 
+├── agent/
+│   ├── agents/
+│   ├── orchestrator/
+│   │   └── .gitkeep
+│   ├── prompts/
+│   │   └── .gitkeep
+│   ├── state/
+│   │   └── .gitkeep
+│   └── tools/
+│       └── .gitkeep
+├── apps/
+│   ├── web/
+│   └── api/
+├── database/
+├── docs/
+├── infrastructure/
+├── ingestion/
+│   ├── parsers/
+│   ├── chunking/
+│   ├── embeddings/
+│   └── indexing/
+├── mcp/
+├── packages/
+├── tests/
+├── .env.example
+├── .gitignore
+├── docker-compose.yml
+└── README.md
+
+
+step 3 - initialize the root project 
+
+now create the readme and .ignore 
+
+create the frontend 
+we are using the next.js
+npx create-next-app@latest apps/web 
+cd apps/web 
+
+ set up the backend 
+virtual env and fast api 
+
+pip install fastapi uvicorn pydantic
+make the venv and then run the backend 
+
+
+phase 2 - postgres , pgvector , redis 
+
+Redis for the caching and pgvector for the store and 
+seache on the postgreSql 
+
+Before do the config and the docker services 
+docker compose up -d 
+
+
+
+
+
+
+
