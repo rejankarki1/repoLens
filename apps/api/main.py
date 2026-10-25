@@ -1,5 +1,7 @@
 """FastAPI application and service health endpoints."""
 
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 
@@ -13,8 +15,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import get_settings
-from apps.api.core.database import engine, get_db
+from apps.api.core.database import engine, get_db, session_factory
+from apps.api.core.queue import get_queue
 from apps.api.core.redis import get_redis, redis_lifespan
+from apps.api.jobs.maintenance import sweeper_loop
 from apps.api.routes.files import router as files_router
 from apps.api.routes.ingestions import router as ingestions_router
 from apps.api.routes.repositories import router as repositories_router
@@ -27,10 +31,19 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage Redis startup and release service connections on shutdown."""
+    sweeper: asyncio.Task[None] | None = None
+    if settings.ingestion_sweep_interval_seconds > 0:
+        sweeper = asyncio.create_task(
+            sweeper_loop(session_factory, get_queue(), settings.ingestion_sweep_interval_seconds)
+        )
     try:
         async with redis_lifespan(app):
             yield
     finally:
+        if sweeper is not None:
+            sweeper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sweeper
         await engine.dispose()
 
 

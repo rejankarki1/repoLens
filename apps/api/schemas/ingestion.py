@@ -15,6 +15,3 @@ class IngestionStatusResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-
-class IngestionResultResponse(IngestionStatusResponse):
-    files_stored: int

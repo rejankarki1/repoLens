@@ -21,6 +21,23 @@ class Settings(BaseSettings):
     archive_reader_max_total_bytes: int = 52_428_800
     archive_reader_max_entries_scanned: int = 20_000
     archive_reader_max_path_length: int = 1_024
+    ingestion_queue_name: str = "ingestion"
+    ingestion_job_timeout_seconds: int = 900
+    # One retry per entry, for transient failures only (see jobs/ingestion_job.py).
+    ingestion_retry_intervals_seconds: list[int] = [30, 120]
+    ingestion_failure_ttl_seconds: int = 86_400
+    # A running job refreshes `ingestion_heartbeat_at` this often.
+    ingestion_heartbeat_interval_seconds: float = 15.0
+    # A job is stale when its heartbeat is older than these (and RQ no longer knows a live job for it).
+    ingestion_stale_running_seconds: int = 90
+    ingestion_stale_queued_seconds: int = 900
+    # How long Redis keeps a worker registered after its last heartbeat. A crashed worker's running
+    # job only becomes recoverable once this expires (RQ's default would be 7 minutes).
+    ingestion_worker_ttl_seconds: int = 60
+    # How often the API process looks for stale jobs; 0 disables the periodic sweep.
+    ingestion_sweep_interval_seconds: float = 60.0
+    # Temp archives older than this cannot belong to a live job (jobs are killed at the job timeout).
+    ingestion_orphan_archive_max_age_seconds: int = 1_800
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

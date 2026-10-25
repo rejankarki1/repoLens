@@ -2,18 +2,19 @@
 
 import io
 import zipfile
-from collections.abc import AsyncIterator
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.core.queue import get_queue
+from apps.api.jobs.ingestion_job import run_ingestion
 from apps.api.main import app
 from apps.api.models.entities import Repository, SourceFile
 from apps.api.services.archive_reader import ArchiveReadResult, Category, SourceFile as ArchiveFile
-from apps.api.services.github_archive import ArchiveDownloadResult, get_archive_service
+from apps.api.services.github_archive import ArchiveDownloadResult
 from apps.api.services.source_file_persistence import persist_source_snapshot
 
 pytestmark = pytest.mark.anyio
@@ -180,14 +181,12 @@ async def test_files_available_after_real_ingestion_flow(
     zip_path.write_bytes(buffer.getvalue())
     archives.fetch_repository_archive.return_value = ArchiveDownloadResult(archive_path=zip_path, commit_sha=SHA_NEW)
 
-    async def override() -> AsyncIterator[AsyncMock]:
-        yield archives
-
-    app.dependency_overrides[get_archive_service] = override
+    app.dependency_overrides[get_queue] = lambda: MagicMock()
     try:
-        assert (await real_client.post(f"/repositories/{repo_id}/ingestions")).status_code == 200
+        assert (await real_client.post(f"/repositories/{repo_id}/ingestions")).status_code == 202
     finally:
-        app.dependency_overrides.pop(get_archive_service, None)
+        app.dependency_overrides.pop(get_queue, None)
+    await run_ingestion(real_db_session, repo_id, archives)  # the worker's half of the flow
 
     listing = await real_client.get(f"/repositories/{repo_id}/files")
     content = await real_client.get(f"/repositories/{repo_id}/files/content", params={"path": "src/app.py"})

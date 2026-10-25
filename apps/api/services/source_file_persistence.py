@@ -82,6 +82,7 @@ async def persist_source_snapshot(
         repository.ingestion_truncated = False
         repository.ingestion_error = None
         repository.last_ingested_at = datetime.now(timezone.utc)
+        repository.ingestion_heartbeat_at = None
         await db.commit()
     except BaseException:
         await db.rollback()
