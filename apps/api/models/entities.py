@@ -45,7 +45,7 @@ class Repository(Base):
     __tablename__ = "repositories"
     __table_args__ = (
         CheckConstraint(
-            "ingestion_status IN ('pending', 'in_progress', 'completed', 'failed')",
+            "ingestion_status IN ('pending', 'queued', 'in_progress', 'completed', 'failed')",
             name="valid_ingestion_status",
         ),
     )
@@ -67,6 +67,7 @@ class Repository(Base):
     )
     ingestion_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_ingested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ingestion_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     github_account: Mapped[GitHubAccount | None] = relationship(back_populates="repositories")
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="repository")
     source_files: Mapped[list["SourceFile"]] = relationship(
