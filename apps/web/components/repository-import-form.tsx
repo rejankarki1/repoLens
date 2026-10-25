@@ -34,9 +34,10 @@ export function RepositoryImportForm() {
       // The API wants a full URL; the form also accepts "owner/name" and bare github.com URLs.
       const repo = await importRepository(`https://github.com/${parsed.owner}/${parsed.name}`)
       await mutate('repositories')
-      // Tracked by the client's ingestion registry; progress is shown in the workspace via polling.
-      startIngestion(repo.id).catch(() => undefined)
-      setNotice(`Imported ${repo.fullName}. Ingesting source files…`)
+      // Returns as soon as the job is queued (202); the workspace shows progress by polling. If queueing
+      // fails the backend records it, so the workspace still opens with the right state.
+      await startIngestion(repo.id).catch(() => undefined)
+      setNotice(`Imported ${repo.fullName}. Ingestion is running in the background.`)
       setValue('')
       router.push(`/repos/${repo.id}`)
     } catch (err) {

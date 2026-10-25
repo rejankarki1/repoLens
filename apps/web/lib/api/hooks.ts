@@ -2,28 +2,33 @@
 
 import useSWR from 'swr'
 import type { Repository } from '@/lib/types'
-import { getFile, getFileTree, getRepository, isIngestionRunning, listRepositories } from './client'
+import { getFile, getFileTree, getRepository, listRepositories } from './client'
 import * as api from './mock-client'
 
-const isInProgress = (r?: Repository) => r?.status === 'importing' || r?.status === 'indexing'
+/** Queued or being processed by the worker: the status will change on its own, so keep polling. */
+const isActive = (r?: Repository) => r?.status === 'queued' || r?.status === 'importing' || r?.status === 'indexing'
 const POLL_MS = 1_500
 
 export function useRepositories() {
   return useSWR('repositories', listRepositories, {
-    refreshInterval: (data) =>
-      data?.some((r) => isInProgress(r) || isIngestionRunning(r.id)) ? POLL_MS : 0,
+    refreshInterval: (data) => (data?.some(isActive) ? POLL_MS : 0),
   })
 }
 
 export function useRepository(id: string) {
   return useSWR(['repository', id], () => getRepository(id), {
-    refreshInterval: (data) => (isInProgress(data) || isIngestionRunning(id) ? POLL_MS : 0),
+    refreshInterval: (data) => (isActive(data) ? POLL_MS : 0),
   })
 }
 
-/** Repository-scoped resources are only fetched once indexing has completed. */
+/**
+ * Repository-scoped resources are fetched whenever a stored snapshot exists (`indexedCommit`), even
+ * while a re-ingestion is running or after one failed: the backend keeps serving the last good
+ * snapshot. The key includes `lastAnalyzedAt`, which changes on every successful ingestion, so a
+ * finished re-ingestion automatically refetches the file list and any open file.
+ */
 function readyKey(repo: Repository | undefined, ...parts: string[]) {
-  return repo?.status === 'completed' ? [...parts, repo.id, repo.lastAnalyzedAt ?? ''] : null
+  return repo?.indexedCommit ? [...parts, repo.id, repo.lastAnalyzedAt ?? ''] : null
 }
 
 export function useFileTree(repo: Repository | undefined) {

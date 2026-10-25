@@ -3,6 +3,7 @@ import type { IndexingState } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 const CONFIG: Record<IndexingState, { label: string; className: string; icon: typeof Clock; spin?: boolean }> = {
+  pending: { label: 'Not ingested', className: 'text-muted-foreground bg-muted', icon: Clock },
   queued: { label: 'Queued', className: 'text-muted-foreground bg-muted', icon: Clock },
   importing: { label: 'Importing', className: 'text-primary bg-primary/10', icon: Loader2, spin: true },
   indexing: { label: 'Ingesting', className: 'text-warning bg-warning/10', icon: Loader2, spin: true },

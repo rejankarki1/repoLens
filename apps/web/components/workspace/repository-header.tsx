@@ -10,11 +10,12 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useRepository } from '@/lib/api/hooks'
-import { isIngestionRunning, startIngestion } from '@/lib/api/client'
+import { describeIngestionError, startIngestion } from '@/lib/api/client'
 
 export function RepositoryHeader({ id }: { id: string }) {
   const { data: repo, isLoading } = useRepository(id)
   const [reanalyzing, setReanalyzing] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
   if (isLoading) {
     return (
@@ -26,15 +27,16 @@ export function RepositoryHeader({ id }: { id: string }) {
   }
   if (!repo) return null
 
-  const busy = repo.status === 'importing' || repo.status === 'indexing' || isIngestionRunning(id)
+  const busy = repo.status === 'queued' || repo.status === 'importing' || repo.status === 'indexing'
 
   async function handleReanalyze() {
-    // Deduplicated by the client: a run already in flight is reused, not restarted.
+    // Local guard against double clicks; the backend's 409 is the authoritative duplicate check.
     setReanalyzing(true)
+    setNotice(null)
     try {
       await startIngestion(id)
-    } catch {
-      // The failure (with a safe message) is recorded server-side and shown via the polled status.
+    } catch (err) {
+      setNotice(describeIngestionError(err).message)
     } finally {
       setReanalyzing(false)
     }
@@ -111,7 +113,13 @@ export function RepositoryHeader({ id }: { id: string }) {
         </div>
       </div>
 
-      {busy && <IndexingProgressBar status={repo.status} progress={repo.progress} />}
+      {notice && (
+        <p role="alert" className="text-xs text-destructive">
+          {notice}
+        </p>
+      )}
+
+      {busy && <IndexingProgressBar status="indexing" progress={repo.progress} />}
     </header>
   )
 }

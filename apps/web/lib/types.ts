@@ -1,4 +1,4 @@
-export type IndexingState = 'queued' | 'importing' | 'indexing' | 'completed' | 'failed'
+export type IndexingState = 'pending' | 'queued' | 'importing' | 'indexing' | 'completed' | 'failed'
 
 export interface LanguageShare {
   name: string

@@ -13,7 +13,7 @@ interface ApiRepository {
   full_name: string
   default_branch: string
   created_at: string
-  ingestion_status: 'pending' | 'in_progress' | 'completed' | 'failed'
+  ingestion_status: 'pending' | 'queued' | 'in_progress' | 'completed' | 'failed'
   last_ingested_commit_sha: string | null
   ingestion_truncated: boolean
   last_ingested_at: string | null
@@ -67,7 +67,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 /* --------------------------------- Adapters --------------------------------- */
 
 const STATUS_MAP: Record<ApiRepository['ingestion_status'], IndexingState> = {
-  pending: 'queued',
+  pending: 'pending',
+  queued: 'queued',
   in_progress: 'indexing',
   completed: 'completed',
   failed: 'failed',
@@ -89,7 +90,7 @@ function toRepository(api: ApiRepository): Repository {
     indexedCommit: api.last_ingested_commit_sha ? api.last_ingested_commit_sha.slice(0, 7) : null,
     license: null,
     lastAnalyzedAt: api.last_ingested_at,
-    status: STATUS_MAP[api.ingestion_status] ?? 'queued',
+    status: STATUS_MAP[api.ingestion_status] ?? 'pending',
     // The backend reports no percentage; null renders an indeterminate bar.
     progress: null,
     error: api.ingestion_status === 'failed' ? api.ingestion_error : null,
@@ -165,32 +166,26 @@ export async function getFile(id: string, path: string): Promise<SourceFile> {
 /* -------------------------------- Ingestion --------------------------------- */
 
 /**
- * `POST /repositories/{id}/ingestions` blocks until the source is stored, which can take a while.
- * The request lives in this module-level registry, so it survives client-side navigation between
- * pages, is awaited by whoever started it, and can't be started twice for the same repository.
- * (A full page reload aborts the request; the backend's 409 guard and the polled status cover that.)
+ * Asks the backend to queue an ingestion (`202 Accepted`). The work happens in an RQ worker, so this
+ * returns as soon as the job is queued; progress is read by polling the repository (see `hooks.ts`).
+ *
+ * PostgreSQL is the authority on duplicates: if an ingestion is already queued or running the
+ * backend answers 409, which callers can treat as "already in progress". Whatever the outcome, the
+ * cached repository is refreshed so the UI shows the status the server actually has.
  */
-const runningIngestions = new Map<string, Promise<void>>()
-
-export function isIngestionRunning(id: string): boolean {
-  return runningIngestions.has(id)
+export async function startIngestion(id: string): Promise<void> {
+  try {
+    await request<unknown>(`/repositories/${encodeURIComponent(id)}/ingestions`, { method: 'POST' })
+  } finally {
+    void mutate(['repository', id])
+    void mutate('repositories')
+  }
 }
 
-export function startIngestion(id: string): Promise<void> {
-  const existing = runningIngestions.get(id)
-  if (existing) return existing
-
-  const run = request<unknown>(`/repositories/${encodeURIComponent(id)}/ingestions`, { method: 'POST' })
-    .then(() => undefined)
-    .finally(() => {
-      runningIngestions.delete(id)
-      // Final state (completed / failed + safe error message) comes from the server.
-      void mutate(['repository', id])
-      void mutate('repositories')
-    })
-  runningIngestions.set(id, run)
-  // Start polling immediately instead of waiting for the blocking request to finish.
-  void mutate(['repository', id])
-  void mutate('repositories')
-  return run
+/** Turns an ingestion-request failure into a message for the user. */
+export function describeIngestionError(err: unknown): { message: string; alreadyActive: boolean } {
+  if (err instanceof ApiError && err.status === 409) {
+    return { message: 'An ingestion for this repository is already queued or running.', alreadyActive: true }
+  }
+  return { message: err instanceof Error ? err.message : 'Could not start ingestion.', alreadyActive: false }
 }
