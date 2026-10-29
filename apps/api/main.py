@@ -22,6 +22,7 @@ from apps.api.jobs.maintenance import sweeper_loop
 from apps.api.routes.files import router as files_router
 from apps.api.routes.ingestions import router as ingestions_router
 from apps.api.routes.repositories import router as repositories_router
+from apps.api.routes.search import router as search_router
 
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ app = FastAPI(
 app.include_router(repositories_router)
 app.include_router(ingestions_router)
 app.include_router(files_router)
+app.include_router(search_router)
 
 app.add_middleware(
     CORSMiddleware,

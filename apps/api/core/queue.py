@@ -35,6 +35,7 @@ def get_queue() -> Queue:
 
 
 INGESTION_JOB_FUNC = "apps.api.jobs.ingestion_job.ingest_repository_job"
+EMBEDDING_JOB_FUNC = "apps.api.jobs.embedding_job.embed_repository_job"
 
 
 def _worker_is_alive(name: str | None, connection: Redis, max_age_seconds: float) -> bool:
@@ -53,8 +54,10 @@ def _worker_is_alive(name: str | None, connection: Redis, max_age_seconds: float
     return datetime.now(timezone.utc) - heartbeat <= timedelta(seconds=max_age_seconds)
 
 
-def live_repository_ids(queue: Queue, settings: Settings | None = None) -> set[int]:
-    """Repositories RQ still has a live ingestion job for: waiting, scheduled for retry, or running.
+def live_repository_ids(
+    queue: Queue, settings: Settings | None = None, job_func: str = INGESTION_JOB_FUNC
+) -> set[int]:
+    """Repositories RQ still has a live job of `job_func` for (ingestion by default): waiting, scheduled for retry, or running.
 
     A running job only counts while the worker that started it is alive (recent heartbeat), so a
     crashed worker's leftover registry entry does not protect its repository. Raises
@@ -65,12 +68,27 @@ def live_repository_ids(queue: Queue, settings: Settings | None = None) -> set[i
     job_ids = set(queue.job_ids) | set(ScheduledJobRegistry(queue=queue).get_job_ids()) | started_ids
     live: set[int] = set()
     for job in Job.fetch_many(job_ids, connection=queue.connection):
-        if job is None or job.func_name != INGESTION_JOB_FUNC or not job.args:
+        if job is None or job.func_name != job_func or not job.args:
             continue
         if job.id in started_ids and not _worker_is_alive(job.worker_name, queue.connection, max_age):
             continue
         live.add(int(job.args[0]))
     return live
+
+
+def enqueue_embedding(queue: Queue, repository_id: int, settings: Settings | None = None) -> Job:
+    """Queue an embedding job on the same queue and worker as ingestion (same timeout and retry policy)."""
+    from apps.api.jobs.embedding_job import embed_repository_job
+
+    settings = settings or get_settings()
+    intervals = settings.embedding_retry_intervals_seconds
+    return queue.enqueue(
+        embed_repository_job,
+        repository_id,
+        job_timeout=settings.ingestion_job_timeout_seconds,
+        failure_ttl=settings.ingestion_failure_ttl_seconds,
+        retry=Retry(max=len(intervals), interval=intervals) if intervals else None,
+    )
 
 
 def enqueue_ingestion(queue: Queue, repository_id: int, settings: Settings | None = None) -> Job:
@@ -87,3 +105,4 @@ def enqueue_ingestion(queue: Queue, repository_id: int, settings: Settings | Non
         failure_ttl=settings.ingestion_failure_ttl_seconds,
         retry=Retry(max=len(intervals), interval=intervals) if intervals else None,
     )
+

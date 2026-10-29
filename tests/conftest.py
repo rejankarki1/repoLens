@@ -8,7 +8,7 @@ import asyncpg
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -96,6 +96,7 @@ async def _reset_test_schema() -> None:
     engine = create_async_engine(_test_database_url())
     try:
         async with engine.begin() as conn:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))  # code_embeddings uses pgvector
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
     finally:

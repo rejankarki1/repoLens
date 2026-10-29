@@ -8,13 +8,19 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, insert, select
+from sqlalchemy import bindparam, delete, func, insert, literal_column, select
+from sqlalchemy.dialects.postgresql import to_tsvector
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.entities import CodeChunk, Repository, SourceFile
 from apps.api.services.archive_reader import ArchiveReadResult
 from apps.api.services.code_parser import CodeChunk as ParsedChunk
+from apps.api.services.code_search import search_documents
 
+# The weighted full-text document of a chunk, built by PostgreSQL from the two normalized texts in each row.
+SEARCH_VECTOR = func.setweight(to_tsvector("simple", bindparam("meta_text")), literal_column("'A'")).op("||")(
+    func.setweight(to_tsvector("simple", bindparam("body_text")), literal_column("'C'"))
+)
 
 
 class SourcePersistenceError(Exception):
@@ -29,8 +35,12 @@ class IncompleteSnapshotError(SourcePersistenceError):
     """The archive result was truncated, so it is not a complete picture of the repository."""
 
 
-def chunk_row(source_file_id: int, chunk_index: int, chunk: ParsedChunk) -> dict[str, object]:
-    """The `code_chunks` row for a parser chunk (values are bounded to their column sizes)."""
+def chunk_row(source_file_id: int, chunk_index: int, chunk: ParsedChunk, path: str = "") -> dict[str, object]:
+    """The `code_chunks` row for a parser chunk (values are bounded to their column sizes).
+
+    `meta_text` / `body_text` are not columns: the INSERT turns them into `search_vector`.
+    """
+    meta_text, body_text = search_documents(path, chunk.symbols, chunk.content)
     return {
         "source_file_id": source_file_id,
         "chunk_index": chunk_index,
@@ -47,6 +57,8 @@ def chunk_row(source_file_id: int, chunk_index: int, chunk: ParsedChunk) -> dict
         "ends_mid_line": chunk.ends_mid_line,
         "content": chunk.content,
         "content_hash": hashlib.sha256(chunk.content.encode("utf-8")).hexdigest(),
+        "meta_text": meta_text,
+        "body_text": body_text,
     }
 
 
@@ -117,12 +129,12 @@ async def persist_source_snapshot(
             )
             file_ids = {path: file_id for file_id, path in inserted}
             rows = [
-                chunk_row(file_ids[path], index, chunk)
+                chunk_row(file_ids[path], index, chunk, path)
                 for path, chunks in chunks_by_path.items()
                 for index, chunk in enumerate(chunks)
             ]
             if rows:
-                await db.execute(insert(CodeChunk), rows)  # batched
+                await db.execute(insert(CodeChunk).values(search_vector=SEARCH_VECTOR), rows)  # batched
 
         repository.last_ingested_commit_sha = result.commit_sha
         repository.ingestion_status = "completed"

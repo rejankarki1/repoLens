@@ -40,10 +40,23 @@ def ingest_repository_job(repository_id: int) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     job = get_current_job()
     # `retries_left` is the number of retries still available *after* this attempt fails.
-    asyncio.run(_run(repository_id, will_retry=bool(job and job.retries_left)))
+    completed = asyncio.run(_run(repository_id, will_retry=bool(job and job.retries_left)))
+    if completed is True and get_settings().embeddings_enabled:
+        _enqueue_embedding(repository_id)
 
 
-async def _run(repository_id: int, will_retry: bool = False) -> None:
+def _enqueue_embedding(repository_id: int) -> None:
+    """Start building the semantic index. Ingestion is already `completed`, so a failure here (Redis
+    hiccup, anything) is only logged: `POST /repositories/{id}/embeddings` can start it later."""
+    try:
+        from apps.api.core.queue import enqueue_embedding, get_ingestion_queue
+
+        enqueue_embedding(get_ingestion_queue(), repository_id)
+    except Exception:
+        logger.warning("Could not enqueue embeddings for repository %s", repository_id, exc_info=True)
+
+
+async def _run(repository_id: int, will_retry: bool = False) -> bool:
     # A fresh engine per job: asyncpg connections are bound to the event loop `asyncio.run` created.
     settings = get_settings()
     engine = create_async_engine(settings.database_url, poolclass=pool.NullPool)
@@ -56,7 +69,7 @@ async def _run(repository_id: int, will_retry: bool = False) -> None:
     try:
         async with sessions() as db:
             async with GitHubArchiveService() as archives:
-                await run_ingestion(db, repository_id, archives, will_retry=will_retry)
+                return await run_ingestion(db, repository_id, archives, will_retry=will_retry)
     finally:
         heartbeat.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -83,8 +96,10 @@ async def heartbeat_loop(
 
 async def run_ingestion(
     db: AsyncSession, repository_id: int, archives: GitHubArchiveService, *, will_retry: bool = False
-) -> None:
+) -> bool:
     """Run the pipeline and translate its outcome into "return" (done) or "raise" (retry).
+
+    Returns True only when the repository was ingested and is now `completed`.
 
     Returning means the job is finished and PostgreSQL holds the result, including permanent
     failures, which are already recorded as `failed` with a safe message. Only transient failures
@@ -102,3 +117,5 @@ async def run_ingestion(
         logger.warning("Ingestion of repository %s failed permanently: %s", repository_id, exc.message)
     else:
         logger.info("Ingested repository %s: %s files stored", repository_id, files_stored)
+        return True
+    return False

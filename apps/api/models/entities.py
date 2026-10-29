@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -15,7 +16,8 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.types import UserDefinedType
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.api.models.base import Base
@@ -147,6 +149,7 @@ class CodeChunk(Base):
         CheckConstraint("chunk_index >= 0", name="valid_code_chunk_index"),
         CheckConstraint("start_line >= 1 AND end_line >= start_line", name="valid_code_chunk_lines"),
         CheckConstraint("start_byte >= 0 AND end_byte > start_byte", name="valid_code_chunk_bytes"),
+        Index("ix_code_chunks_search_vector", "search_vector", postgresql_using="gin"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -167,6 +170,49 @@ class CodeChunk(Base):
     ends_mid_line: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     content: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str] = mapped_column(String(64))  # sha256 hex of `content` (UTF-8), like source_files
+    # Weighted full-text document: path and symbol names (A) over the code itself (C). Built in SQL at
+    # insert time from normalized text (services/code_search.py); NULL only for rows written elsewhere.
+    search_vector: Mapped[str | None] = mapped_column(TSVECTOR, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     source_file: Mapped[SourceFile] = relationship(back_populates="chunks")
+
+
+EMBEDDING_DIMENSIONS = 1_536  # gemini-embedding-001 at 1,536 dimensions; a change needs a new migration and a re-embed
+
+
+class Vector(UserDefinedType):
+    """pgvector `vector(N)`, passed to asyncpg as text so no extra Python package is needed."""
+
+    cache_ok = True
+    render_bind_cast = True
+
+    def __init__(self, dimensions: int) -> None:
+        self.dimensions = dimensions
+
+    def get_col_spec(self, **kw: object) -> str:
+        return f"VECTOR({self.dimensions})"
+
+    def bind_processor(self, dialect: object):  # type: ignore[no-untyped-def]
+        def process(value: list[float] | None) -> str | None:
+            return None if value is None else "[" + ",".join(repr(float(x)) for x in value) + "]"
+
+        return process
+
+
+class CodeEmbedding(Base):
+    """The embedding of one chunk text under one model, keyed by the text's hash.
+
+    Content-addressed on purpose: re-ingesting an unchanged chunk (same commit or a new one, in any
+    repository) reuses its vector instead of paying for it again, and a vector can never be attached
+    to different text. Searches reach it only through `code_chunks.content_hash`, so they are always
+    limited to a repository's current chunks, and rows for different models never mix (`model` is part
+    of the key and of every lookup).
+    """
+
+    __tablename__ = "code_embeddings"
+
+    content_hash: Mapped[str] = mapped_column(String(64), primary_key=True)  # = code_chunks.content_hash
+    model: Mapped[str] = mapped_column(String(64), primary_key=True)  # "<model>/<dimensions>"
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

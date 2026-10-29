@@ -69,6 +69,7 @@ def _chunk(source_file_id: int, index: int = 0, **overrides: object) -> CodeChun
 def _chunk_row(source_file_id: int, index: int, chunk: code_parser.CodeChunk) -> CodeChunk:
     """A row built with the same mapping the persistence service uses."""
     row = chunk_row(source_file_id, index, chunk)
+    row.pop("meta_text"), row.pop("body_text")  # inputs of search_vector, not columns
     return CodeChunk(**row)
 
 
@@ -284,7 +285,7 @@ def test_table_definition_matches_the_reviewed_design() -> None:
     assert set(table.columns.keys()) == {
         "id", "source_file_id", "chunk_index", "language", "kind", "symbol_name", "symbols", "parser_mode",
         "start_line", "end_line", "start_byte", "end_byte", "starts_mid_line", "ends_mid_line",
-        "content", "content_hash", "created_at",
+        "content", "content_hash", "search_vector", "created_at",
     }
     # the repository and commit are reached through source_files, never duplicated here
     assert not {"repository_id", "commit_sha", "path"} & set(table.columns.keys())
@@ -292,7 +293,7 @@ def test_table_definition_matches_the_reviewed_design() -> None:
     assert [c.name for c in table.c if not c.nullable and c.name not in {"id"}] == [
         "source_file_id", "chunk_index", "language", "kind", "symbols", "parser_mode", "start_line", "end_line",
         "start_byte", "end_byte", "starts_mid_line", "ends_mid_line", "content", "content_hash", "created_at",
-    ]  # only symbol_name is optional
+    ]  # only symbol_name and search_vector are optional
 
     foreign_keys = [c for c in table.constraints if isinstance(c, ForeignKeyConstraint)]
     assert [(fk.elements[0].target_fullname, fk.ondelete) for fk in foreign_keys] == [("source_files.id", "CASCADE")]
@@ -302,9 +303,10 @@ def test_table_definition_matches_the_reviewed_design() -> None:
     assert checks == {
         "valid_code_chunk_parser_mode", "valid_code_chunk_index", "valid_code_chunk_lines", "valid_code_chunk_bytes",
     }
-    # the unique constraint already indexes (source_file_id, chunk_index); symbol lookup is extra
+    # the unique constraint already indexes (source_file_id, chunk_index); symbol lookup and full-text search are extra
     assert {i.name: [c.name for c in i.columns] for i in table.indexes} == {
         "ix_code_chunks_symbol_name": ["symbol_name"],
+        "ix_code_chunks_search_vector": ["search_vector"],
     }
 
 
