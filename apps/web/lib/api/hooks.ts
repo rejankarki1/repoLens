@@ -3,6 +3,7 @@
 import useSWR from 'swr'
 import type { Repository } from '@/lib/types'
 import { getFile, getFileTree, getRepository, listRepositories } from './client'
+import { getSearchIndex, listConversations } from './chat'
 import * as api from './mock-client'
 
 /** Queued or being processed by the worker: the status will change on its own, so keep polling. */
@@ -50,5 +51,12 @@ export function useDependencyGraph(repo: Repository | undefined) {
 }
 
 export function useConversations(repoId: string) {
-  return useSWR(['conversations', repoId], () => api.listConversations(repoId))
+  return useSWR(['conversations', repoId], () => listConversations(repoId))
+}
+
+/** Embedding-index readiness; only informs the UI, chatting works without it (keyword fallback). */
+export function useSearchIndex(repo: Repository | undefined) {
+  return useSWR(readyKey(repo, 'search-index'), () => getSearchIndex(repo!.id), {
+    refreshInterval: (data) => (data?.semantic === 'partial' || data?.semantic === 'not_built' ? 15_000 : 0),
+  })
 }
