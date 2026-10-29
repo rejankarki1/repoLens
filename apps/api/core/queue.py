@@ -36,6 +36,7 @@ def get_queue() -> Queue:
 
 INGESTION_JOB_FUNC = "apps.api.jobs.ingestion_job.ingest_repository_job"
 EMBEDDING_JOB_FUNC = "apps.api.jobs.embedding_job.embed_repository_job"
+ARCHITECTURE_JOB_FUNC = "apps.api.jobs.architecture_job.analyze_architecture_job"
 
 
 def _worker_is_alive(name: str | None, connection: Redis, max_age_seconds: float) -> bool:
@@ -106,3 +107,18 @@ def enqueue_ingestion(queue: Queue, repository_id: int, settings: Settings | Non
         retry=Retry(max=len(intervals), interval=intervals) if intervals else None,
     )
 
+
+def enqueue_architecture(queue: Queue, repository_id: int, settings: Settings | None = None) -> Job:
+    """Queue an architecture analysis on the same queue and worker as ingestion.
+
+    No RQ retry: the analysis is deterministic, so a failure is recorded on its row and the user re-requests it.
+    """
+    from apps.api.jobs.architecture_job import analyze_architecture_job
+
+    settings = settings or get_settings()
+    return queue.enqueue(
+        analyze_architecture_job,
+        repository_id,
+        job_timeout=settings.ingestion_job_timeout_seconds,
+        failure_ttl=settings.ingestion_failure_ttl_seconds,
+    )

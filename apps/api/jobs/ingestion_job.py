@@ -41,8 +41,10 @@ def ingest_repository_job(repository_id: int) -> None:
     job = get_current_job()
     # `retries_left` is the number of retries still available *after* this attempt fails.
     completed = asyncio.run(_run(repository_id, will_retry=bool(job and job.retries_left)))
-    if completed is True and get_settings().embeddings_enabled:
-        _enqueue_embedding(repository_id)
+    if completed is True:
+        _queue_architecture(repository_id)  # deterministic and free of any provider key, so always
+        if get_settings().embeddings_enabled:
+            _enqueue_embedding(repository_id)
 
 
 def _enqueue_embedding(repository_id: int) -> None:
@@ -54,6 +56,29 @@ def _enqueue_embedding(repository_id: int) -> None:
         enqueue_embedding(get_ingestion_queue(), repository_id)
     except Exception:
         logger.warning("Could not enqueue embeddings for repository %s", repository_id, exc_info=True)
+
+
+def _queue_architecture(repository_id: int) -> None:
+    """Start the architecture analysis of the freshly ingested commit. Ingestion is already `completed`, so a failure
+    here is only logged: `POST /repositories/{id}/architecture` can start it later."""
+    try:
+        asyncio.run(_queue_architecture_async(repository_id))
+    except Exception:
+        logger.warning("Could not queue architecture analysis for repository %s", repository_id, exc_info=True)
+
+
+async def _queue_architecture_async(repository_id: int) -> None:
+    from apps.api.core.queue import enqueue_architecture, get_ingestion_queue
+    from apps.api.services.architecture.store import queue_analysis
+
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url, poolclass=pool.NullPool)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            queue = get_ingestion_queue()
+            await queue_analysis(db, repository_id, lambda: enqueue_architecture(queue, repository_id, settings), settings=settings)
+    finally:
+        await engine.dispose()
 
 
 async def _run(repository_id: int, will_retry: bool = False) -> bool:

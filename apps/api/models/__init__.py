@@ -1,5 +1,6 @@
 from apps.api.models.base import Base
 from apps.api.models.entities import (
+    ArchitectureAnalysis,
     CodeChunk,
     CodeEmbedding,
     Conversation,
@@ -10,4 +11,4 @@ from apps.api.models.entities import (
     User,
 )
 
-__all__ = ["Base", "User", "GitHubAccount", "Repository", "Conversation", "Message", "SourceFile", "CodeChunk", "CodeEmbedding"]
+__all__ = ["ArchitectureAnalysis", "Base", "User", "GitHubAccount", "Repository", "Conversation", "Message", "SourceFile", "CodeChunk", "CodeEmbedding"]

@@ -219,3 +219,31 @@ class CodeEmbedding(Base):
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+
+class ArchitectureAnalysis(Base):
+    """The architecture graph of a repository: one row per repository.
+
+    `status` describes the latest *attempt* (queued, running, completed, failed). The result columns
+    (`result_commit_sha`, `summary`, `detail`, ...) are written only when an attempt succeeds, so a failed
+    or lost re-analysis never erases the last completed result; readers compare `result_commit_sha` with the
+    repository's current ingested commit to know whether it is stale.
+    """
+
+    __tablename__ = "architecture_analyses"
+    __table_args__ = (
+        UniqueConstraint("repository_id", name="uq_architecture_analyses_repository"),
+        CheckConstraint("status IN ('queued', 'running', 'completed', 'failed')", name="valid_architecture_status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(20))
+    target_commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)  # commit the latest attempt analyzes
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    result_commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    analyzer_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)  # module-level (high-level) view
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)  # file-level graph

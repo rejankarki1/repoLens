@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     # Temp archives older than this cannot belong to a live job (jobs are killed at the job timeout).
     ingestion_orphan_archive_max_age_seconds: int = 1_800
 
+    # --- Architecture analysis (see docs/architecture.md). Deterministic: no AI provider is involved.
+    architecture_max_files: int = 5_000  # code files analyzed per repository; the rest are skipped with a warning
+
+    @property
+    def architecture_stale_seconds(self) -> int:
+        """A queued/running analysis not touched for this long is treated as lost (its job cannot outlive the job timeout)."""
+        return self.ingestion_job_timeout_seconds + 60
+
     # --- Semantic search (see docs/search.md). Embeddings are optional: without a key, search is keyword-only.
     gemini_api_key: SecretStr | None = None  # env GEMINI_API_KEY; never logged or returned by the API
     embedding_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
