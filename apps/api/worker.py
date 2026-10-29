@@ -17,6 +17,7 @@ from rq.worker import SpawnWorker
 from apps.api.config import get_settings
 from apps.api.core.queue import get_ingestion_queue
 from apps.api.jobs.maintenance import run_startup_maintenance
+from apps.api.services.code_parser import missing_grammars
 
 
 def worker_class() -> type[Worker]:
@@ -37,6 +38,9 @@ def build_worker(queue: Queue) -> Worker:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    missing = missing_grammars()
+    if missing:  # never downloaded while processing a repository: those files use the text fallback
+        logging.getLogger(__name__).warning("Tree-sitter grammars not installed: %s. Run ensure_grammars().", missing)
     run_startup_maintenance()
     build_worker(get_ingestion_queue()).work(with_scheduler=True)
 

@@ -237,11 +237,11 @@ async def test_worker_runs_queued_to_in_progress_to_completed(
     real_persist = ingestion_module.persist_source_snapshot
     seen: list[str] = []
 
-    async def spy(db: AsyncSession, repository_id: int, result: object) -> int:
+    async def spy(db: AsyncSession, repository_id: int, result: object, chunks: object = None) -> int:
         state = await _repo_state(db, repository_id)
         seen.append(state.ingestion_status)
         assert state.ingestion_heartbeat_at is not None  # set by the worker's claim
-        return await real_persist(db, repository_id, result)  # type: ignore[arg-type]
+        return await real_persist(db, repository_id, result, chunks)  # type: ignore[arg-type]
 
     monkeypatch.setattr(ingestion_module, "persist_source_snapshot", spy)
 
@@ -282,7 +282,7 @@ async def test_worker_failure_after_success_keeps_previous_snapshot(
     _serve(archives, _write_zip(tmp_path, {"old.py": "old\n"}, "one.zip"), SHA_A)
     await _queue_and_run(real_db_session, repo_id, archives)
 
-    async def delete_then_explode(db: AsyncSession, repository_id: int, result: object) -> int:
+    async def delete_then_explode(db: AsyncSession, repository_id: int, result: object, chunks: object = None) -> int:
         await db.execute(delete(SourceFile).where(SourceFile.repository_id == repository_id))
         raise RuntimeError("disk exploded at /secret/path")
 

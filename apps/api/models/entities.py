@@ -15,6 +15,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.api.models.base import Base
@@ -123,3 +124,49 @@ class SourceFile(Base):
     line_count: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     repository: Mapped[Repository] = relationship(back_populates="source_files")
+    chunks: Mapped[list["CodeChunk"]] = relationship(
+        back_populates="source_file",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="CodeChunk.chunk_index",
+    )
+
+
+class CodeChunk(Base):
+    """One syntax-aware (or line-based fallback) chunk of a stored source file.
+
+    The repository and commit are reached through `source_file`, so they are not repeated here. Chunks
+    live and die with their file: replacing a repository's snapshot deletes its `source_files` rows,
+    and the foreign key cascades to the chunks.
+    """
+
+    __tablename__ = "code_chunks"
+    __table_args__ = (
+        UniqueConstraint("source_file_id", "chunk_index", name="uq_code_chunks_source_file_chunk_index"),
+        CheckConstraint("parser_mode IN ('ast', 'fallback')", name="valid_code_chunk_parser_mode"),
+        CheckConstraint("chunk_index >= 0", name="valid_code_chunk_index"),
+        CheckConstraint("start_line >= 1 AND end_line >= start_line", name="valid_code_chunk_lines"),
+        CheckConstraint("start_byte >= 0 AND end_byte > start_byte", name="valid_code_chunk_bytes"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_file_id: Mapped[int] = mapped_column(ForeignKey("source_files.id", ondelete="CASCADE"))
+    chunk_index: Mapped[int] = mapped_column(Integer)  # 0-based position within the file
+    language: Mapped[str] = mapped_column(String(64))  # parser language ("tsx" for .tsx), or the label of a text fallback
+    kind: Mapped[str] = mapped_column(String(32))  # class, function, method, interface, imports, code, text, ...
+    symbol_name: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)  # primary symbol
+    symbols: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )  # every symbol that starts in the chunk, in source order
+    parser_mode: Mapped[str] = mapped_column(String(10))  # 'ast' or 'fallback'
+    start_line: Mapped[int] = mapped_column(Integer)  # 1-based, inclusive
+    end_line: Mapped[int] = mapped_column(Integer)  # 1-based, inclusive
+    start_byte: Mapped[int] = mapped_column(Integer)  # UTF-8 offset into source_files.content, inclusive
+    end_byte: Mapped[int] = mapped_column(Integer)  # exclusive
+    starts_mid_line: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    ends_mid_line: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    content: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64))  # sha256 hex of `content` (UTF-8), like source_files
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    source_file: Mapped[SourceFile] = relationship(back_populates="chunks")
+

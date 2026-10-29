@@ -13,6 +13,7 @@ Every transition is a single conditional UPDATE, and none is held open across th
 
 import asyncio
 import logging
+import time
 from collections.abc import Collection
 from datetime import timedelta
 
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.config import get_settings
 from apps.api.models.entities import Repository
 from apps.api.services.archive_reader import ArchiveReadError, read_archive
+from apps.api.services.code_indexing import index_entries
 from apps.api.services.github import (
     GitHubRateLimitedError,
     GitHubServiceError,
@@ -257,7 +259,22 @@ async def ingest_repository(
             result = await asyncio.to_thread(read_archive, download.archive_path, download.commit_sha)
         finally:
             download.cleanup()
-        return await persist_source_snapshot(db, repository_id, result)
+        # Chunk the files before the persistence transaction starts, in a thread so the event loop (and
+        # the job's heartbeat) keeps running. A truncated result is rejected by the persistence step.
+        index = None if result.truncated else await asyncio.to_thread(index_entries, result.entries)
+        persist_started = time.perf_counter()
+        files_stored = await persist_source_snapshot(
+            db, repository_id, result, index.chunks_by_path if index else None
+        )
+        if index is not None:
+            logger.info(
+                "Indexed repository %s at %s: %s files, %s chunks (%s AST files, %s text-fallback files %s, %s unchunked); "
+                "chunking %.0f ms, database write %.0f ms",
+                repository_id, result.commit_sha[:7], index.stats.files, index.stats.chunks, index.stats.ast_files,
+                index.stats.fallback_files, index.stats.fallback_reasons, index.stats.failed_files,
+                index.stats.duration_ms, (time.perf_counter() - persist_started) * 1000,
+            )
+        return files_stored
     except Exception as exc:
         status_code, message = _classify(exc)
         if status_code == 500:

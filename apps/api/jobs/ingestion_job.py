@@ -35,6 +35,9 @@ class TransientIngestionError(Exception):
 
 def ingest_repository_job(repository_id: int) -> None:
     """RQ entry point: ingest one repository. Must be importable by path in the worker process."""
+    # A spawned work-horse is a fresh interpreter with no logging configured, which would drop the
+    # INFO indexing metrics. No-op when the process is already configured (e.g. a forked Worker).
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     job = get_current_job()
     # `retries_left` is the number of retries still available *after* this attempt fails.
     asyncio.run(_run(repository_id, will_retry=bool(job and job.retries_left)))

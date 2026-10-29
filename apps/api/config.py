@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     archive_reader_max_total_bytes: int = 52_428_800
     archive_reader_max_entries_scanned: int = 20_000
     archive_reader_max_path_length: int = 1_024
+    # Maximum size of one code chunk in UTF-8 bytes (minimum 16, see services/code_parser.py).
+    code_chunk_max_bytes: int = 1_500
     ingestion_queue_name: str = "ingestion"
     ingestion_job_timeout_seconds: int = 900
     # One retry per entry, for transient failures only (see jobs/ingestion_job.py).

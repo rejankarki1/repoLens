@@ -1,16 +1,20 @@
 """Saves an `ArchiveReadResult` into PostgreSQL as the repository's latest source-file snapshot.
 
-Storage only: it does not download archives, read ZIPs, or know about HTTP. The caller supplies a
-repository ID and an already-read result.
+Storage only: it does not download archives, read ZIPs, parse code, or know about HTTP. The caller
+supplies a repository ID, an already-read result and, optionally, the code chunks of its files.
 """
 
+import hashlib
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.models.entities import Repository, SourceFile
+from apps.api.models.entities import CodeChunk, Repository, SourceFile
 from apps.api.services.archive_reader import ArchiveReadResult
+from apps.api.services.code_parser import CodeChunk as ParsedChunk
+
 
 
 class SourcePersistenceError(Exception):
@@ -25,25 +29,60 @@ class IncompleteSnapshotError(SourcePersistenceError):
     """The archive result was truncated, so it is not a complete picture of the repository."""
 
 
+def chunk_row(source_file_id: int, chunk_index: int, chunk: ParsedChunk) -> dict[str, object]:
+    """The `code_chunks` row for a parser chunk (values are bounded to their column sizes)."""
+    return {
+        "source_file_id": source_file_id,
+        "chunk_index": chunk_index,
+        "language": chunk.language[:64],
+        "kind": chunk.kind[:32],
+        "symbol_name": chunk.symbol[:255] if chunk.symbol else None,
+        "symbols": list(chunk.symbols),
+        "parser_mode": chunk.parser,
+        "start_line": chunk.start_line,
+        "end_line": chunk.end_line,
+        "start_byte": chunk.start_byte,
+        "end_byte": chunk.end_byte,
+        "starts_mid_line": chunk.starts_mid_line,
+        "ends_mid_line": chunk.ends_mid_line,
+        "content": chunk.content,
+        "content_hash": hashlib.sha256(chunk.content.encode("utf-8")).hexdigest(),
+    }
+
+
 async def persist_source_snapshot(
-    db: AsyncSession, repository_id: int, result: ArchiveReadResult
+    db: AsyncSession,
+    repository_id: int,
+    result: ArchiveReadResult,
+    chunks_by_path: Mapping[str, Sequence[ParsedChunk]] | None = None,
 ) -> int:
     """Replace the repository's stored snapshot with `result` and return the number of files saved.
 
+    `chunks_by_path` maps a file's path to its code chunks (in order); files without an entry simply
+    have no chunks. Files and chunks are written in the same transaction, so they are always
+    consistent: a chunk can only exist next to the file it was cut from, in the current snapshot.
+
     Everything happens in one transaction that this function commits. If anything fails, the
-    transaction is rolled back and the previously stored snapshot (and its ingestion metadata)
-    is left exactly as it was. Truncated results are rejected before the database is touched.
+    transaction is rolled back and the previously stored snapshot, its chunks and its ingestion
+    metadata are left exactly as they were. Truncated results are rejected before the database is
+    touched.
 
     The repository row is locked (`SELECT ... FOR UPDATE`) for the duration, so concurrent
     ingestions of the same repository run one after another; the last one to commit wins.
-    Old rows are deleted before the new ones are inserted, so re-ingesting the same commit
-    cannot create duplicates and no rows from a previous commit survive.
+    Old rows are deleted before the new ones are inserted (the foreign key cascade removes the old
+    chunks), so re-ingesting the same commit cannot create duplicates, no rows from a previous commit
+    survive, and a snapshot stored before chunks existed gets its chunks on the next ingestion.
     """
     if result.truncated:
         raise IncompleteSnapshotError(
             f"Archive for {result.commit_sha} was truncated ({result.limit_hit}); "
             "refusing to store a partial snapshot."
         )
+
+    chunks_by_path = chunks_by_path or {}
+    unknown_paths = set(chunks_by_path) - {entry.path for entry in result.entries}
+    if unknown_paths:
+        raise ValueError(f"Chunks given for files that are not in the snapshot: {sorted(unknown_paths)[:3]}")
 
     try:
         repository = (
@@ -59,8 +98,8 @@ async def persist_source_snapshot(
 
         await db.execute(delete(SourceFile).where(SourceFile.repository_id == repository_id))
         if result.entries:
-            await db.execute(
-                insert(SourceFile),
+            inserted = await db.execute(
+                insert(SourceFile).returning(SourceFile.id, SourceFile.path),
                 [
                     {
                         "repository_id": repository_id,
@@ -76,6 +115,14 @@ async def persist_source_snapshot(
                     for entry in result.entries
                 ],
             )
+            file_ids = {path: file_id for file_id, path in inserted}
+            rows = [
+                chunk_row(file_ids[path], index, chunk)
+                for path, chunks in chunks_by_path.items()
+                for index, chunk in enumerate(chunks)
+            ]
+            if rows:
+                await db.execute(insert(CodeChunk), rows)  # batched
 
         repository.last_ingested_commit_sha = result.commit_sha
         repository.ingestion_status = "completed"
