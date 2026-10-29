@@ -1,6 +1,7 @@
 """Environment-based configuration for the API."""
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -65,6 +66,31 @@ class Settings(BaseSettings):
     # Cosine distance above which a vector hit is ignored; None keeps every nearest neighbour. Calibrate
     # against real embeddings before setting it.
     search_max_semantic_distance: float | None = None
+
+    # --- Answer generation / RAG (see docs/rag.md). Uses the same GEMINI_API_KEY as embeddings.
+    gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    gemini_generation_model: str = "gemini-3.5-flash"
+    gemini_generation_timeout_seconds: float = 60.0  # per read: how long Gemini may stay silent
+    gemini_generation_deadline_seconds: float = 120.0  # whole answer, including streaming
+    gemini_generation_temperature: float = 0.2
+    # Includes thinking tokens on Gemini 2.5 models, so thinking is switched off (budget 0) by default: the
+    # answer is grounded in the supplied excerpts, and it keeps latency and cost low. None omits the setting.
+    gemini_generation_max_output_tokens: int = 2_048
+    gemini_thinking_budget: int | None = 0
+    rag_context_chunks: int = 8  # most source excerpts sent with a question
+    rag_context_max_chars: int = 24_000  # and the most code characters across them
+    rag_history_messages: int = 6  # most recent conversation messages sent as follow-up context
+    rag_history_max_chars: int = 2_000  # per history message
+    rag_question_max_chars: int = 2_000
+
+    # Which provider writes answers. Embeddings always use Gemini, whatever this is set to. No automatic fallback.
+    generation_provider: Literal["gemini", "groq"] = "gemini"  # env GENERATION_PROVIDER
+    groq_api_key: SecretStr | None = None  # env GROQ_API_KEY; never logged or returned by the API
+    groq_api_base_url: str = "https://api.groq.com/openai/v1"
+    groq_generation_model: str = "llama-3.3-70b-versatile"
+    # Only for reasoning models such as openai/gpt-oss-120b (low | medium | high); unset sends nothing.
+    groq_reasoning_effort: str | None = None
+    # Groq also uses the gemini_generation_timeout/deadline/temperature/max_output_tokens settings above.
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

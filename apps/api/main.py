@@ -19,6 +19,7 @@ from apps.api.core.database import engine, get_db, session_factory
 from apps.api.core.queue import get_queue
 from apps.api.core.redis import get_redis, redis_lifespan
 from apps.api.jobs.maintenance import sweeper_loop
+from apps.api.routes.conversations import router as conversations_router
 from apps.api.routes.files import router as files_router
 from apps.api.routes.ingestions import router as ingestions_router
 from apps.api.routes.repositories import router as repositories_router
@@ -59,6 +60,7 @@ app.include_router(repositories_router)
 app.include_router(ingestions_router)
 app.include_router(files_router)
 app.include_router(search_router)
+app.include_router(conversations_router)
 
 app.add_middleware(
     CORSMiddleware,

@@ -1,6 +1,7 @@
 """Foundation tables for repository and conversation metadata."""
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -103,6 +104,8 @@ class Message(Base):
     )
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
+    # Validated source citations of an assistant answer (path, lines, bytes, commit...); [] otherwise.
+    citations: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
