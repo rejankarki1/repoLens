@@ -1,7 +1,6 @@
 import type {
   ChatMessage,
   Conversation,
-  DependencyGraph,
   FileTreeNode,
   MockAnswer,
   Repository,
@@ -9,7 +8,7 @@ import type {
 } from '@/lib/types'
 import { seedRepositories } from '@/lib/mock/repositories'
 import { getDataset } from '@/lib/mock/datasets'
-import { buildDependencyGraph, buildFileTree, parseGitHubUrl } from '@/lib/repo-utils'
+import { buildFileTree, parseGitHubUrl } from '@/lib/repo-utils'
 
 /**
  * In-browser mock of the RepoLens backend. Every function mirrors an endpoint
@@ -168,11 +167,6 @@ export async function getRepositoryInsights(repoId: string) {
   await delay(300)
   const dataset = getDataset(findRepository(repoId))
   return { ...dataset.insights, isPlaceholder: Boolean(dataset.isPlaceholder) }
-}
-
-export async function getDependencyGraph(repoId: string): Promise<DependencyGraph> {
-  await delay(300)
-  return buildDependencyGraph(getDataset(findRepository(repoId)).files)
 }
 
 /* ---------------------------------- Chat --------------------------------- */

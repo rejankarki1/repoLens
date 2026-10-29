@@ -118,18 +118,3 @@ export interface Conversation {
   messages: ChatMessage[]
   updatedAt: string
 }
-
-export interface GraphNodeData {
-  path: string
-  label: string
-  group: ModuleGroup
-  imports: string[]
-  importedBy: string[]
-  exports: string[]
-  summary?: string
-}
-
-export interface DependencyGraph {
-  nodes: GraphNodeData[]
-  edges: { source: string; target: string }[]
-}

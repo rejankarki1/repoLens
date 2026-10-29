@@ -2,7 +2,9 @@
 
 import useSWR from 'swr'
 import type { Repository } from '@/lib/types'
+import { isActive as analysisActive, STATUS_POLL_MS } from '@/lib/architecture/model'
 import { getFile, getFileTree, getRepository, listRepositories } from './client'
+import { getArchitecture, getArchitectureNode, getArchitectureStatus, type AnalysisStatus } from './architecture'
 import { getSearchIndex, listConversations } from './chat'
 import * as api from './mock-client'
 
@@ -46,8 +48,37 @@ export function useInsights(repo: Repository | undefined) {
   return useSWR(readyKey(repo, 'insights'), () => api.getRepositoryInsights(repo!.id))
 }
 
-export function useDependencyGraph(repo: Repository | undefined) {
-  return useSWR(readyKey(repo, 'graph'), () => api.getDependencyGraph(repo!.id))
+/**
+ * Architecture analysis status. Polls only while an analysis is queued or running; the key includes the repository's
+ * last-ingested time so a re-ingestion refreshes it.
+ */
+export function useArchitectureStatus(repo: Repository | undefined) {
+  return useSWR(
+    repo?.indexedCommit ? ['architecture-status', repo.id, repo.lastAnalyzedAt ?? ''] : null,
+    () => getArchitectureStatus(repo!.id),
+    { refreshInterval: (data) => (analysisActive(data) ? STATUS_POLL_MS : 0) },
+  )
+}
+
+/** The key of the stored result: it changes exactly when a new analysis completes, which refetches the graph. */
+const resultKey = (status: AnalysisStatus | undefined, ...parts: string[]) =>
+  status?.has_result ? [...parts, status.analyzed_commit_sha ?? '', status.analyzed_at ?? ''] : null
+
+/** The last completed graph. Stays available (marked stale by the status) while a newer analysis runs or fails. */
+export function useArchitectureGraph(repo: Repository | undefined, status: AnalysisStatus | undefined) {
+  return useSWR(
+    repo ? resultKey(status, 'architecture-graph', repo.id) : null,
+    () => getArchitecture(repo!.id),
+    { keepPreviousData: true },
+  )
+}
+
+/** File-level detail of one module or file, from the same stored result as the graph. */
+export function useArchitectureNode(repo: Repository | undefined, nodeId: string | null, status: AnalysisStatus | undefined) {
+  return useSWR(
+    repo && nodeId ? resultKey(status, 'architecture-node', repo.id, nodeId) : null,
+    () => getArchitectureNode(repo!.id, nodeId!),
+  )
 }
 
 export function useConversations(repoId: string) {

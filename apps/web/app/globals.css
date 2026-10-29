@@ -154,3 +154,27 @@
   }
 }
 
+
+/* Architecture graph (React Flow): follow the RepoLens theme in light and dark. */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-background-pattern-color: var(--border);
+  --xy-node-border-radius: var(--radius-lg);
+  --xy-edge-label-color: var(--foreground);
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--accent);
+  --xy-controls-button-color: var(--foreground);
+  --xy-controls-button-color-hover: var(--foreground);
+  --xy-controls-button-border-color: var(--border);
+  --xy-minimap-background-color: var(--card);
+  --xy-attribution-background-color: transparent;
+}
+.react-flow__node-card {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.react-flow__attribution {
+  font-size: 10px;
+  opacity: 0.6;
+}

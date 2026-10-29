@@ -50,7 +50,7 @@ function describeDetail(detail: unknown, fallback: string): string {
   return fallback
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
     response = await fetch(`${API_URL}${path}`, init)

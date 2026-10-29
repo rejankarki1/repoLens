@@ -1,4 +1,4 @@
-import type { DependencyGraph, FileTreeNode, SourceFile } from '@/lib/types'
+import type { FileTreeNode, SourceFile } from '@/lib/types'
 
 export function buildFileTree(files: Pick<SourceFile, 'path'>[]): FileTreeNode[] {
   const root: FileTreeNode = { name: '', path: '', type: 'directory', children: [] }
@@ -32,27 +32,6 @@ export function buildFileTree(files: Pick<SourceFile, 'path'>[]): FileTreeNode[]
 export function ancestorDirectories(path: string): string[] {
   const parts = path.split('/')
   return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('/'))
-}
-
-export function buildDependencyGraph(files: SourceFile[]): DependencyGraph {
-  const graphFiles = files.filter((f) => f.group)
-  const known = new Set(graphFiles.map((f) => f.path))
-  const edges = graphFiles.flatMap((f) =>
-    f.imports.filter((target) => known.has(target)).map((target) => ({ source: f.path, target })),
-  )
-
-  return {
-    nodes: graphFiles.map((f) => ({
-      path: f.path,
-      label: f.path.split('/').pop() ?? f.path,
-      group: f.group!,
-      imports: f.imports.filter((p) => known.has(p)),
-      importedBy: edges.filter((e) => e.target === f.path).map((e) => e.source),
-      exports: f.exports,
-      summary: f.summary,
-    })),
-    edges,
-  }
 }
 
 const GITHUB_URL = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([A-Za-z0-9._-]{1,100}?)(?:\.git)?\/?$/
