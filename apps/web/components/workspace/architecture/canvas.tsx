@@ -74,11 +74,12 @@ function Card({ data, selected }: NodeProps<CardNode>) {
       aria-label={summary}
       aria-pressed={selected}
       title={viz.node?.path ?? viz.label}
+      // React Flow gives nodes pointer-events:none when they are neither selectable nor draggable (as here); the card handles its own clicks.
       onClick={() => onSelect(viz.id)}
       onDoubleClick={() => canOpen && onOpen(viz.id)}
       onKeyDown={handleKey}
       className={cn(
-        'group relative flex cursor-pointer flex-col justify-center gap-1 overflow-hidden rounded-lg border bg-card py-2 pr-3 pl-4 text-left shadow-sm transition-[opacity,box-shadow,border-color] outline-none',
+        'pointer-events-auto group relative flex cursor-pointer flex-col justify-center gap-1 overflow-hidden rounded-lg border bg-card py-2 pr-3 pl-4 text-left shadow-sm transition-[opacity,box-shadow,border-color] outline-none',
         'hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/60',
         selected ? 'border-primary ring-2 ring-primary/40' : 'border-border',
         viz.type === 'neighbor' && 'border-dashed bg-card/70',
