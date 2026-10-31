@@ -25,10 +25,10 @@ Ask a natural-language question about an imported repository and get a Gemini an
 | POST | `/repositories/{id}/conversations/{cid}/messages/stream` | Server-sent events |
 
 ```bash
-curl -X POST localhost:8000/repositories/1/conversations
-curl -X POST localhost:8000/repositories/1/conversations/1/messages \
+curl -X POST localhost:8765/repositories/1/conversations
+curl -X POST localhost:8765/repositories/1/conversations/1/messages \
   -H 'content-type: application/json' -d '{"content": "How are passwords hashed?"}'
-curl -N -X POST localhost:8000/repositories/1/conversations/1/messages/stream \
+curl -N -X POST localhost:8765/repositories/1/conversations/1/messages/stream \
   -H 'content-type: application/json' -d '{"content": "How are sessions stored?"}'
 ```
 
