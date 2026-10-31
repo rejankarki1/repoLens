@@ -150,8 +150,9 @@ export function CodeExplorer({ repo, file, lines }: CodeExplorerProps) {
               href={`${repo.url}/blob/${repo.indexedCommit}/${source.path.split('/').map(encodeURIComponent).join('/')}${highlight ? `#L${highlight.start}${highlight.end > highlight.start ? `-L${highlight.end}` : ''}` : ''}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground hover:text-foreground max-sm:-m-2.5 max-sm:p-2.5"
               title="View this file at the ingested commit on GitHub"
+              aria-label="View this file on GitHub at the ingested commit (opens in a new tab)"
             >
               <ExternalLink className="size-3.5" aria-hidden="true" />
               <span className="hidden sm:inline">GitHub</span>
