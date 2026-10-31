@@ -296,3 +296,52 @@ export const isInstallable = (ecosystem: string) => ecosystem !== 'python_stdlib
 
 /** "1 file", "2 files". */
 export const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/* --------------------------------- Dense graphs --------------------------------- */
+
+export interface GraphFilters {
+  /** Show `import type` / `if TYPE_CHECKING` dependencies (they never run, but add many arrows in TypeScript). */
+  typeOnly: boolean
+  /** In a module's file view, show the dashed neighbour modules and the links to them. */
+  neighbours: boolean
+  /** Find by name or path; matches are kept at full strength and the rest recede. Empty means no search. */
+  query: string
+}
+
+/** More arrows than this and a picture stops being readable, so the optional layers start hidden. */
+export const DENSE_EDGE_COUNT = 40
+
+/** Hide the optional layers by default only when there are too many arrows to read; the user can always switch them on. */
+export function defaultFilters(graph: VizGraph): GraphFilters {
+  const dense = graph.edges.length > DENSE_EDGE_COUNT
+  return { typeOnly: !dense, neighbours: !dense, query: '' }
+}
+
+const isTypeOnly = (e: VizEdge) => e.edges.length > 0 && e.edges.every((b) => b.relationship === 'type_only' || (b.basis === 'aggregated' && isOnlyTypeOnly(b)))
+function isOnlyTypeOnly(edge: GraphEdge): boolean {
+  const kinds = Object.keys(edge.breakdown)
+  return kinds.length > 0 && kinds.every((k) => k === 'type_only')
+}
+
+/** What the filters leave of a graph, and how many arrows they hid (so the UI can say so). Never invents anything. */
+export function applyFilters(graph: VizGraph, filters: GraphFilters): VizGraph & { hiddenEdges: number } {
+  const dropNode = (n: VizNode) => n.type === 'neighbor' && !filters.neighbours
+  const nodes = graph.nodes.filter((n) => !dropNode(n))
+  const kept = new Set(nodes.map((n) => n.id))
+  const edges = graph.edges.filter((e) => kept.has(e.source) && kept.has(e.target) && (filters.typeOnly || !isTypeOnly(e)))
+  return { nodes, edges, hidden: graph.hidden, hiddenEdges: graph.edges.length - edges.length }
+}
+
+/** Ids of the nodes whose name or path contains the query (case-insensitive); empty when there is no query. */
+export function matchingNodes(graph: VizGraph, query: string): Set<string> {
+  const q = query.trim().toLowerCase()
+  if (!q) return new Set()
+  return new Set(
+    graph.nodes
+      .filter((n) => n.label.toLowerCase().includes(q) || (n.node?.path ?? '').toLowerCase().includes(q))
+      .map((n) => n.id),
+  )
+}
+
+/** Whether the architecture analysis reads a file of this name (Python, JavaScript, TypeScript, TSX). */
+export const isAnalyzedPath = (path: string) => /\.(?:pyi?|[cm]?[jt]sx?)$/.test(path)

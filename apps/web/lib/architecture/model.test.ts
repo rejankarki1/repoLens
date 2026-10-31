@@ -150,3 +150,53 @@ test('labels resolve to real module names and paths, never invented ones', async
   )
   assert.deepEqual([isInstallable('npm'), isInstallable('python'), isInstallable('python_stdlib'), isInstallable('node_builtin')], [true, true, false, false])
 })
+
+test('dense graphs start with the optional layers hidden; small ones show everything', async () => {
+  const { defaultFilters, DENSE_EDGE_COUNT } = await import('./model.ts')
+  const viz = (edges: number) => ({ nodes: [], edges: Array.from({ length: edges }, (_, i) => ({ id: `e${i}`, source: 'a', target: 'b', count: 1, inCycle: false, edges: [] })), hidden: [] })
+  assert.deepEqual(defaultFilters(viz(DENSE_EDGE_COUNT)), { typeOnly: true, neighbours: true, query: '' })
+  assert.deepEqual(defaultFilters(viz(DENSE_EDGE_COUNT + 1)), { typeOnly: false, neighbours: false, query: '' })
+})
+
+test('filters hide type-only arrows and neighbour modules, and report how many arrows went', async () => {
+  const { applyFilters } = await import('./model.ts')
+  const { detail, g } = detailFixture()
+  const typed = { ...detail, internal_edges: [edge('file:m/a.ts', 'file:m/b.ts', { relationship: 'type_only' })] }
+  const viz = moduleDetailGraph(typed, g)
+  const all = applyFilters(viz, { typeOnly: true, neighbours: true, query: '' })
+  assert.equal(all.hiddenEdges, 0)
+  assert.equal(all.edges.length, viz.edges.length)
+
+  const noTypes = applyFilters(viz, { typeOnly: false, neighbours: true, query: '' })
+  assert.equal(noTypes.hiddenEdges, 1)
+  assert.ok(!noTypes.edges.some((e) => e.id === typed.internal_edges[0].id))
+
+  const noNeighbours = applyFilters(viz, { typeOnly: true, neighbours: false, query: '' })
+  assert.ok(noNeighbours.nodes.every((n) => n.type !== 'neighbor'))
+  assert.ok(noNeighbours.edges.every((e) => !e.source.startsWith('neighbor:') && !e.target.startsWith('neighbor:')))
+  assert.equal(noNeighbours.hiddenEdges, viz.edges.length - 1)
+})
+
+test('a module-level arrow is type-only only when all of its imports are', async () => {
+  const { applyFilters, overviewGraph } = await import('./model.ts')
+  const g = graph({
+    nodes: [node('module:a', { label: 'a' }), node('module:b', { label: 'b' }), node('module:c', { label: 'c' })],
+    edges: [edge('module:a', 'module:b', { breakdown: { type_only: 3 } }), edge('module:a', 'module:c', { breakdown: { type_only: 1, imports: 2 } })],
+  })
+  const out = applyFilters(overviewGraph(g), { typeOnly: false, neighbours: true, query: '' })
+  assert.deepEqual(out.edges.map((e) => e.target), ['module:c'])
+})
+
+test('search matches names and paths case-insensitively and an empty query matches nothing', async () => {
+  const { matchingNodes, overviewGraph } = await import('./model.ts')
+  const viz = overviewGraph(graph({ nodes: [node('module:src/Services', { label: 'src/Services' }), node('module:src/lib', { label: 'src/lib' })] }))
+  assert.deepEqual([...matchingNodes(viz, 'SERV')], ['module:src/Services'])
+  assert.deepEqual([...matchingNodes(viz, 'src')].length, 2)
+  assert.equal(matchingNodes(viz, '  ').size, 0)
+})
+
+test('only the languages the analysis reads are looked up', async () => {
+  const { isAnalyzedPath } = await import('./model.ts')
+  for (const yes of ['a.py', 'a.pyi', 'src/x.ts', 'x.tsx', 'a.js', 'a.jsx', 'a.mjs', 'a.cjs', 'a.mts', 'a.cts', 'a.d.ts']) assert.equal(isAnalyzedPath(yes), true, yes)
+  for (const no of ['README.md', 'package.json', 'a.css', 'Makefile', 'a.pyc', 'x.json', 'a.tsx.map']) assert.equal(isAnalyzedPath(no), false, no)
+})

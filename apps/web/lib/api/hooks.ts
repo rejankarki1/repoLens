@@ -78,6 +78,7 @@ export function useArchitectureNode(repo: Repository | undefined, nodeId: string
   return useSWR(
     repo && nodeId ? resultKey(status, 'architecture-node', repo.id, nodeId) : null,
     () => getArchitectureNode(repo!.id, nodeId!),
+    { shouldRetryOnError: false }, // a 404 (a file the analysis does not cover) is permanent
   )
 }
 

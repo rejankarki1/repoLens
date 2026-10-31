@@ -163,14 +163,19 @@ interface CanvasProps {
   onSelectNode: (id: string | null) => void
   onSelectEdge: (id: string | null) => void
   onOpenNode: (id: string) => void
-  emptyHint?: string
+  /** Nodes that match the search box; when non-empty, the others recede. */
+  matchIds?: ReadonlySet<string>
 }
 
 export function GraphCanvas(props: CanvasProps) {
   return <CanvasInner {...props} />
 }
 
-function CanvasInner({ graph, graphKey, selectedNodeId, selectedEdgeId, onSelectNode, onSelectEdge, onOpenNode }: CanvasProps) {
+const NO_MATCHES: ReadonlySet<string> = new Set()
+
+function CanvasInner({
+  graph, graphKey, selectedNodeId, selectedEdgeId, onSelectNode, onSelectEdge, onOpenNode, matchIds = NO_MATCHES,
+}: CanvasProps) {
   const { resolvedTheme } = useTheme()
   // On a phone, fitting a wide graph makes it unreadable: start at a readable zoom instead ("Fit to view" still shows all).
   const [narrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640)
@@ -199,7 +204,12 @@ function CanvasInner({ graph, graphKey, selectedNodeId, selectedEdgeId, onSelect
         id: viz.id,
         type: 'card',
         position: layout.positions.get(viz.id) ?? { x: 0, y: 0 },
-        data: { viz, dimmed: focus !== null && !focus.nodes.has(viz.id), onSelect: onSelectNode, onOpen: onOpenNode },
+        data: {
+          viz,
+          dimmed: (focus !== null && !focus.nodes.has(viz.id)) || (matchIds.size > 0 && !matchIds.has(viz.id)),
+          onSelect: onSelectNode,
+          onOpen: onOpenNode,
+        },
         selected: viz.id === selectedNodeId,
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
@@ -208,7 +218,7 @@ function CanvasInner({ graph, graphKey, selectedNodeId, selectedEdgeId, onSelect
         width: SIZE[viz.type].width,
         height: SIZE[viz.type].height,
       })),
-    [graph, layout, focus, selectedNodeId, onSelectNode, onOpenNode],
+    [graph, layout, focus, matchIds, selectedNodeId, onSelectNode, onOpenNode],
   )
 
   const edges = useMemo<Edge[]>(() => {
@@ -254,7 +264,8 @@ function CanvasInner({ graph, graphKey, selectedNodeId, selectedEdgeId, onSelect
         <MiniMap
           pannable
           zoomable
-          position="top-right"
+          position="bottom-right"
+          style={{ width: 150, height: 100, marginBottom: 118 }}
           className="!hidden !bg-card sm:!block"
           maskColor="oklch(0.5 0 0 / 12%)"
           nodeColor={(n) => `var(--${toneVar(kindInfo((n.data as NodeData).viz.kind).tone)})`}

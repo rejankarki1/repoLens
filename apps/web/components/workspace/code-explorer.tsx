@@ -1,10 +1,10 @@
 'use client'
 
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useMemo, useState } from 'react'
-import { ChevronRight, File, FileText, Folder, FolderOpen, PanelLeft, Search, SearchX } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ChevronRight, ExternalLink, File, FileText, Folder, FolderOpen, PanelLeft, Search, SearchX } from 'lucide-react'
 import { CodeViewer, parseLineRange } from '@/components/workspace/code-viewer'
+import { FileRelations } from '@/components/workspace/file-relations'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
@@ -19,6 +19,8 @@ interface CodeExplorerProps {
   file: string | null
   lines: string | null
 }
+
+const NO_TOGGLES: ReadonlyMap<string, boolean> = new Map()
 
 function pickDefaultFile(paths: string[]): string | null {
   return paths.find((p) => /^readme/i.test(p)) ?? paths[0] ?? null
@@ -39,11 +41,12 @@ export function CodeExplorer({ repo, file, lines }: CodeExplorerProps) {
   const { data: source, isLoading: fileLoading, error } = useFile(repo, selected)
   const highlight = parseLineRange(lines)
 
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  useEffect(() => {
-    if (!selected) return
-    setExpanded((prev) => new Set([...prev, ...ancestorDirectories(selected)]))
-  }, [selected])
+  // Folders open because they hold the selected file, unless the user toggled them while that file was selected.
+  // Derived during render (no effect), and a new selection starts from "open the ancestors" again.
+  const [toggles, setToggles] = useState<{ forFile: string | null; byUser: ReadonlyMap<string, boolean> }>({ forFile: null, byUser: new Map() })
+  const ancestors = useMemo(() => new Set(selected ? ancestorDirectories(selected) : []), [selected])
+  const byUser = toggles.forFile === selected ? toggles.byUser : NO_TOGGLES
+  const isExpanded = (dir: string) => byUser.get(dir) ?? ancestors.has(dir)
 
   function open(path: string) {
     setTreeOpen(false)
@@ -51,12 +54,7 @@ export function CodeExplorer({ repo, file, lines }: CodeExplorerProps) {
   }
 
   function toggle(path: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(path)) next.delete(path)
-      else next.add(path)
-      return next
-    })
+    setToggles({ forFile: selected, byUser: new Map(byUser).set(path, !isExpanded(path)) })
   }
 
   const trimmed = query.trim().toLowerCase()
@@ -110,7 +108,7 @@ export function CodeExplorer({ repo, file, lines }: CodeExplorerProps) {
             </ul>
           )
         ) : (
-          <TreeList nodes={tree?.tree ?? []} depth={0} expanded={expanded} selected={selected} onToggle={toggle} onOpen={open} />
+          <TreeList nodes={tree?.tree ?? []} depth={0} isExpanded={isExpanded} selected={selected} onToggle={toggle} onOpen={open} />
         )}
       </div>
     </div>
@@ -147,6 +145,18 @@ export function CodeExplorer({ repo, file, lines }: CodeExplorerProps) {
               </ol>
             </nav>
           )}
+          {source && repo.indexedCommit && (
+            <a
+              href={`${repo.url}/blob/${repo.indexedCommit}/${source.path.split('/').map(encodeURIComponent).join('/')}${highlight ? `#L${highlight.start}${highlight.end > highlight.start ? `-L${highlight.end}` : ''}` : ''}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              title="View this file at the ingested commit on GitHub"
+            >
+              <ExternalLink className="size-3.5" aria-hidden="true" />
+              <span className="hidden sm:inline">GitHub</span>
+            </a>
+          )}
           {source && (
             <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">
               {source.languageLabel ?? LANGUAGE_LABELS[source.language]} · {source.lineCount ?? source.content.split('\n').length} lines
@@ -175,30 +185,7 @@ export function CodeExplorer({ repo, file, lines }: CodeExplorerProps) {
               highlight={highlight}
               className="min-h-0 flex-1"
             />
-            {(source.summary || source.imports.length > 0) && (
-              <div className="shrink-0 border-t border-border bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
-                {source.summary && (
-                  <p>
-                    <span className="font-medium text-foreground">Sample summary · </span>
-                    {source.summary}
-                  </p>
-                )}
-                {source.imports.length > 0 && (
-                  <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span>Imports:</span>
-                    {source.imports.map((p) => (
-                      <Link
-                        key={p}
-                        href={`/repos/${repo.id}?tab=code&file=${encodeURIComponent(p)}`}
-                        className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground hover:bg-accent"
-                      >
-                        {p}
-                      </Link>
-                    ))}
-                  </p>
-                )}
-              </div>
-            )}
+            <FileRelations repo={repo} file={source.path} />
           </>
         ) : null}
       </section>
@@ -206,17 +193,22 @@ export function CodeExplorer({ repo, file, lines }: CodeExplorerProps) {
   )
 }
 
+/** Ref callback: bring the open file's row into view in the tree (a stable function, so it runs once per row). */
+function keepInView(el: HTMLElement | null) {
+  el?.scrollIntoView({ block: 'nearest' })
+}
+
 function TreeList({
   nodes,
   depth,
-  expanded,
+  isExpanded,
   selected,
   onToggle,
   onOpen,
 }: {
   nodes: FileTreeNode[]
   depth: number
-  expanded: Set<string>
+  isExpanded: (dir: string) => boolean
   selected: string | null
   onToggle: (path: string) => void
   onOpen: (path: string) => void
@@ -225,11 +217,12 @@ function TreeList({
     <ul role={depth === 0 ? 'tree' : 'group'}>
       {nodes.map((node) => {
         const isDir = node.type === 'directory'
-        const isOpen = expanded.has(node.path)
+        const isOpen = isExpanded(node.path)
         const Icon = isDir ? (isOpen ? FolderOpen : Folder) : /\.(md|txt)$/i.test(node.name) ? FileText : File
         return (
           <li key={node.path} role="treeitem" aria-expanded={isDir ? isOpen : undefined} aria-selected={node.path === selected}>
             <button
+              ref={node.path === selected && !isDir ? keepInView : undefined}
               onClick={() => (isDir ? onToggle(node.path) : onOpen(node.path))}
               className={cn(
                 'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[13px] hover:bg-accent',
@@ -246,7 +239,7 @@ function TreeList({
               <span className="truncate">{node.name}</span>
             </button>
             {isDir && isOpen && node.children && (
-              <TreeList nodes={node.children} depth={depth + 1} expanded={expanded} selected={selected} onToggle={onToggle} onOpen={onOpen} />
+              <TreeList nodes={node.children} depth={depth + 1} isExpanded={isExpanded} selected={selected} onToggle={onToggle} onOpen={onOpen} />
             )}
           </li>
         )

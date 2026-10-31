@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, ChevronRight, MousePointerClick } from 'lucide-react'
+import { ArrowLeft, ChevronRight, MousePointerClick, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { GraphCanvas } from '@/components/workspace/architecture/canvas'
@@ -14,7 +14,10 @@ import {
 } from '@/components/workspace/architecture/status'
 import { requestArchitectureAnalysis, type AnalysisStatus, type Graph, type GraphEdge } from '@/lib/api/architecture'
 import { useArchitectureGraph, useArchitectureNode, useArchitectureStatus } from '@/lib/api/hooks'
-import { autoRequestKey, count, makeLabeler, moduleDetailGraph, overviewGraph, shouldAutoRequest } from '@/lib/architecture/model'
+import {
+  applyFilters, autoRequestKey, count, defaultFilters, makeLabeler, matchingNodes, moduleDetailGraph, overviewGraph, shouldAutoRequest,
+  type GraphFilters,
+} from '@/lib/architecture/model'
 import type { Repository } from '@/lib/types'
 
 /** Commits an analysis was already requested for in this browser session (the server is idempotent too). */
@@ -100,22 +103,26 @@ type Selection = { type: 'node' | 'edge'; id: string } | null
 function ExplorerBody({ repo, status, graph }: { repo: Repository; status: AnalysisStatus; graph: Graph }) {
   const searchParams = useSearchParams()
   const drilled = searchParams.get('module')
+  const file = searchParams.get('file')
   // Selection belongs to one view of one analysis: remount (and so reset it) when either changes.
   const viewKey = `${graph.commit_sha}:${status.analyzed_at ?? ''}:${drilled ?? 'overview'}`
-  return <View key={viewKey} repo={repo} status={status} graph={graph} drilledId={drilled} viewKey={viewKey} />
+  return <View key={viewKey} repo={repo} status={status} graph={graph} drilledId={drilled} initialFile={drilled ? file : null} viewKey={viewKey} />
 }
 
 function View({
-  repo, status, graph, drilledId, viewKey,
+  repo, status, graph, drilledId, initialFile, viewKey,
 }: {
   repo: Repository
   status: AnalysisStatus
   graph: Graph
   drilledId: string | null
+  /** A file to select when the module opens (a link from the Code Explorer or an answer). */
+  initialFile: string | null
   viewKey: string
 }) {
   const router = useRouter()
-  const [selection, setSelection] = useState<Selection>(null)
+  const [selection, setSelection] = useState<Selection>(() => (initialFile ? { type: 'node', id: `file:${initialFile}` } : null))
+  const [override, setOverride] = useState<Partial<GraphFilters>>({})
   const labelOf = useMemo(() => makeLabeler(graph), [graph])
   const base = `/repos/${repo.id}/graph`
   const goTo = useCallback(
@@ -128,7 +135,12 @@ function View({
 
   const overviewViz = useMemo(() => overviewGraph(graph), [graph])
   const detailViz = useMemo(() => (detail.data ? moduleDetailGraph(detail.data, graph) : null), [detail.data, graph])
-  const viz = drilledId ? detailViz : overviewViz
+  const rawViz = drilledId ? detailViz : overviewViz
+  const filters = useMemo<GraphFilters>(() => ({ ...(rawViz ? defaultFilters(rawViz) : { typeOnly: true, neighbours: true, query: '' }), ...override }), [rawViz, override])
+  const viz = useMemo(() => (rawViz ? applyFilters(rawViz, filters) : null), [rawViz, filters])
+  const matches = useMemo(() => (viz ? matchingNodes(viz, filters.query) : new Set<string>()), [viz, filters.query])
+  // a selection the filters have removed is no longer on the canvas, so the panel falls back to the summary
+  const shown = selection && viz && (selection.type === 'node' ? viz.nodes.some((n) => n.id === selection.id) : viz.edges.some((e) => e.id === selection.id)) ? selection : null
 
   const selectNode = useCallback((id: string | null) => setSelection(id ? { type: 'node', id } : null), [])
   const selectEdge = useCallback((id: string | null) => setSelection(id ? { type: 'edge', id } : null), [])
@@ -144,14 +156,14 @@ function View({
 
   const drilledNode = drilledId ? graph.nodes.find((n) => n.id === drilledId) : undefined
   const panel = drilledId ? (
-    <DetailPanel repo={repo} graph={graph} detail={detail.data} viz={detailViz} selection={selection} labelOf={labelOf} goTo={goTo} onSelect={setSelection} />
+    <DetailPanel repo={repo} graph={graph} detail={detail.data} viz={detailViz} selection={shown} labelOf={labelOf} goTo={goTo} onSelect={setSelection} />
   ) : (
-    <OverviewPanel repo={repo} graph={graph} selection={selection} labelOf={labelOf} goTo={goTo} onSelect={setSelection} />
+    <OverviewPanel repo={repo} graph={graph} selection={shown} labelOf={labelOf} goTo={goTo} onSelect={setSelection} />
   )
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:overflow-hidden">
-      <div className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-3 py-1.5 text-xs sm:px-5" aria-label="View">
+      <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-3 py-1.5 text-xs sm:px-5" aria-label="View">
         {drilledId ? (
           <>
             <Button size="xs" variant="ghost" onClick={() => goTo(null)}>
@@ -173,6 +185,19 @@ function View({
             Enter, then Explore files) to see its files.
           </p>
         )}
+        {rawViz && viz && (
+          <GraphToolbar
+            filters={filters}
+            onChange={(next) => setOverride((o) => ({ ...o, ...next }))}
+            hiddenEdges={viz.hiddenEdges}
+            detail={!!drilledId}
+            matches={matches.size}
+            onPickFirst={() => {
+              const first = [...matches][0]
+              if (first) setSelection({ type: 'node', id: first })
+            }}
+          />
+        )}
       </div>
 
       <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
@@ -184,9 +209,10 @@ function View({
           ) : viz ? (
             <GraphCanvas
               graph={viz}
-              graphKey={viewKey}
-              selectedNodeId={selection?.type === 'node' ? selection.id : null}
-              selectedEdgeId={selection?.type === 'edge' ? selection.id : null}
+              graphKey={`${viewKey}:${filters.typeOnly}:${filters.neighbours}`}
+              matchIds={matches}
+              selectedNodeId={shown?.type === 'node' ? shown.id : null}
+              selectedEdgeId={shown?.type === 'edge' ? shown.id : null}
               onSelectNode={selectNode}
               onSelectEdge={selectEdge}
               onOpenNode={openNode}
@@ -201,6 +227,50 @@ function View({
           {panel}
         </aside>
       </div>
+    </div>
+  )
+}
+
+function GraphToolbar({
+  filters, onChange, hiddenEdges, detail, matches, onPickFirst,
+}: {
+  filters: GraphFilters
+  onChange: (next: Partial<GraphFilters>) => void
+  hiddenEdges: number
+  detail: boolean
+  matches: number
+  onPickFirst: () => void
+}) {
+  const box = 'flex items-center gap-1.5 text-muted-foreground hover:text-foreground'
+  return (
+    <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1" role="group" aria-label="Graph filters">
+      <label className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 focus-within:border-ring">
+        <Search className="size-3.5 text-muted-foreground" aria-hidden="true" />
+        <span className="sr-only">{detail ? 'Find a file' : 'Find a module'}</span>
+        <input
+          value={filters.query}
+          onChange={(e) => onChange({ query: e.target.value })}
+          onKeyDown={(e) => e.key === 'Enter' && onPickFirst()}
+          placeholder={detail ? 'Find a file…' : 'Find a module…'}
+          className="w-32 bg-transparent text-xs outline-none placeholder:text-muted-foreground sm:w-40"
+        />
+        {filters.query.trim() && (
+          <span className="text-[11px] text-muted-foreground tabular-nums" aria-live="polite">
+            {matches === 0 ? 'no match' : count(matches, 'match', 'matches')}
+          </span>
+        )}
+      </label>
+      <label className={box}>
+        <input type="checkbox" className="accent-primary" checked={filters.typeOnly} onChange={(e) => onChange({ typeOnly: e.target.checked })} />
+        Type-only imports
+      </label>
+      {detail && (
+        <label className={box}>
+          <input type="checkbox" className="accent-primary" checked={filters.neighbours} onChange={(e) => onChange({ neighbours: e.target.checked })} />
+          Other modules
+        </label>
+      )}
+      {hiddenEdges > 0 && <span className="text-[11px] text-muted-foreground">{count(hiddenEdges, 'arrow')} hidden</span>}
     </div>
   )
 }
