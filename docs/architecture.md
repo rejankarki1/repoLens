@@ -121,6 +121,14 @@ earns no role without code that shows it.
    type-only imports cannot form a load-time cycle. The overview lists at most 50 nodes per cycle and 100 cycles; every
    member node and edge carries `cycle_id`.
 
+## Using the graph in the web app
+
+The Architecture tab reads these endpoints only; nothing is analysed in the browser.
+
+- **Dense graphs.** Type-only imports can be switched off, and the files of a drilled-down module can show the other modules they import as collapsed stubs ("Other modules"). A repository with more than 40 dependency arrows starts with the optional layers hidden and says how many arrows are hidden. "Find a module" / "Find a file" highlights matches and Enter selects the first.
+- **Links in.** `/repos/{id}/graph?module=<module id>&file=<path>` opens a module and selects one file. The Code Explorer's "Dependencies" panel (files the open file imports and files that import it, each linked to the exact import line) and its "Show in architecture" link use it; the panel appears only when an analysis exists and covers the file.
+- **Overview.** The repository overview summarises the stored analysis (modules, dependencies, packages, cycles, unresolved imports, detected technologies) and links to the graph.
+
 ## Processing
 
 The analysis runs as an RQ job on the existing ingestion queue and worker (`analyze_architecture_job`), with the
