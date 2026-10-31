@@ -1,12 +1,13 @@
 'use client'
 
+import { useMemo } from 'react'
 import useSWR from 'swr'
 import type { Repository } from '@/lib/types'
+import { summarizeFiles } from '@/lib/repo-stats'
 import { isActive as analysisActive, STATUS_POLL_MS } from '@/lib/architecture/model'
-import { getFile, getFileTree, getRepository, listRepositories } from './client'
+import { getFile, getFileSummaries, getRepository, listRepositories, toFileTree } from './client'
 import { getArchitecture, getArchitectureNode, getArchitectureStatus, type AnalysisStatus } from './architecture'
 import { getSearchIndex, listConversations } from './chat'
-import * as api from './mock-client'
 
 /** Queued or being processed by the worker: the status will change on its own, so keep polling. */
 const isActive = (r?: Repository) => r?.status === 'queued' || r?.status === 'importing' || r?.status === 'indexing'
@@ -34,18 +35,27 @@ function readyKey(repo: Repository | undefined, ...parts: string[]) {
   return repo?.indexedCommit ? [...parts, repo.id, repo.lastAnalyzedAt ?? ''] : null
 }
 
+/** The stored file list (metadata only). One request feeds both the file tree and the overview's numbers. */
+export function useFileSummaries(repo: Repository | undefined) {
+  return useSWR(readyKey(repo, 'files'), () => getFileSummaries(repo!.id))
+}
+
 export function useFileTree(repo: Repository | undefined) {
-  return useSWR(readyKey(repo, 'tree'), () => getFileTree(repo!.id))
+  const files = useFileSummaries(repo)
+  const data = useMemo(() => (files.data ? toFileTree(files.data) : undefined), [files.data])
+  return { ...files, data }
+}
+
+export function useRepositoryStats(repo: Repository | undefined) {
+  const files = useFileSummaries(repo)
+  const data = useMemo(() => (files.data ? summarizeFiles(files.data) : undefined), [files.data])
+  return { ...files, data }
 }
 
 export function useFile(repo: Repository | undefined, path: string | null) {
   return useSWR(path ? readyKey(repo, 'file', path) : null, () => getFile(repo!.id, path!), {
     keepPreviousData: true,
   })
-}
-
-export function useInsights(repo: Repository | undefined) {
-  return useSWR(readyKey(repo, 'insights'), () => api.getRepositoryInsights(repo!.id))
 }
 
 /**

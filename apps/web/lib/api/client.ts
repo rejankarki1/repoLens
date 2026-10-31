@@ -1,5 +1,6 @@
 import { mutate } from 'swr'
 import { buildFileTree } from '@/lib/repo-utils'
+import type { FileSummary } from '@/lib/repo-stats'
 import type { CodeLanguage, FileTreeNode, IndexingState, Repository, SourceFile } from '@/lib/types'
 
 /** Inlined at build time (see `.env.example`). */
@@ -85,16 +86,13 @@ function toRepository(api: ApiRepository): Repository {
     url: `https://github.com/${api.full_name}`,
     description: '',
     primaryLanguage: 'Unknown',
-    languages: [],
     defaultBranch: api.default_branch,
     indexedCommit: api.last_ingested_commit_sha ? api.last_ingested_commit_sha.slice(0, 7) : null,
-    license: null,
     lastAnalyzedAt: api.last_ingested_at,
     status: STATUS_MAP[api.ingestion_status] ?? 'pending',
     // The backend reports no percentage; null renders an indeterminate bar.
     progress: null,
     error: api.ingestion_status === 'failed' ? api.ingestion_error : null,
-    stats: null,
   }
 }
 
@@ -140,9 +138,14 @@ function toLanguageLabel(language: string): string {
   return language.charAt(0).toUpperCase() + language.slice(1)
 }
 
-/** Folder tree built from the flat, metadata-only file list. */
-export async function getFileTree(id: string): Promise<{ tree: FileTreeNode[] }> {
+/** The flat, metadata-only file list of the stored snapshot (no source text). */
+export async function getFileSummaries(id: string): Promise<FileSummary[]> {
   const files = await request<ApiFileSummary[]>(`/repositories/${encodeURIComponent(id)}/files`)
+  return files.map((f) => ({ path: f.path, language: f.language, category: f.category, sizeBytes: f.size_bytes, lineCount: f.line_count }))
+}
+
+/** Folder tree built from the file list. */
+export function toFileTree(files: FileSummary[]): { tree: FileTreeNode[] } {
   return { tree: buildFileTree(files) }
 }
 
@@ -157,9 +160,6 @@ export async function getFile(id: string, path: string): Promise<SourceFile> {
     languageLabel: toLanguageLabel(file.language),
     lineCount: file.line_count,
     content: file.content,
-    // Mock-era analysis fields: the backend has no import/export/summary data.
-    imports: [],
-    exports: [],
   }
 }
 

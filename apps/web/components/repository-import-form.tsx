@@ -66,7 +66,7 @@ export function RepositoryImportForm() {
         </label>
         <div
           className={cn(
-            'flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-lg border bg-card px-3 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30',
+            'flex h-11 min-w-0 shrink-0 items-center sm:flex-1 gap-2.5 rounded-lg border bg-card px-3 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30',
             error ? 'border-destructive' : 'border-border',
           )}
         >

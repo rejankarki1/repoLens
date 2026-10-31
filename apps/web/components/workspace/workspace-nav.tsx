@@ -25,7 +25,7 @@ export function WorkspaceNav({ id }: { id: string }) {
 
   return (
     <nav aria-label="Workspace" className="border-b border-border px-2 sm:px-4">
-      <ul className="flex gap-1 overflow-x-auto">
+      <ul className="flex gap-1 overflow-x-auto max-sm:justify-between">
         {tabs.map(({ key, label, icon: Icon, href }) => {
           const isActive = active === key
           return (
@@ -34,7 +34,7 @@ export function WorkspaceNav({ id }: { id: string }) {
                 href={href}
                 aria-current={isActive ? 'page' : undefined}
                 className={cn(
-                  'relative flex h-10 items-center gap-2 px-3 text-sm whitespace-nowrap transition-colors',
+                  'relative flex h-10 items-center gap-2 px-3 max-sm:px-3.5 text-sm whitespace-nowrap transition-colors',
                   'after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:transition-colors',
                   isActive
                     ? 'font-medium text-foreground after:bg-primary'
@@ -42,7 +42,7 @@ export function WorkspaceNav({ id }: { id: string }) {
                 )}
               >
                 <Icon className="size-4" aria-hidden="true" />
-                {label}
+                <span className={cn(!isActive && 'max-sm:sr-only')}>{label}</span>
               </Link>
             </li>
           )

@@ -10,6 +10,12 @@ const LANGUAGE_COLORS: Record<string, string> = {
   CSS: 'bg-violet-500',
   EJS: 'bg-lime-500',
   Shell: 'bg-emerald-500',
+  Markdown: 'bg-slate-400',
+  JSON: 'bg-amber-300',
+  SQL: 'bg-teal-500',
+  YAML: 'bg-rose-400',
+  TOML: 'bg-stone-400',
+  Other: 'bg-border',
 }
 
 export function languageColor(language: string) {

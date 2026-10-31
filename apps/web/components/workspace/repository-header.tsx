@@ -104,11 +104,11 @@ export function RepositoryHeader({ id }: { id: string }) {
             nativeButton={false}
           >
             <ExternalLink aria-hidden="true" />
-            GitHub
+            <span className="max-sm:sr-only">GitHub</span>
           </Button>
           <Button variant="outline" size="sm" onClick={handleReanalyze} disabled={busy || reanalyzing}>
             <RefreshCw className={busy || reanalyzing ? 'animate-spin' : undefined} aria-hidden="true" />
-            Re-analyze
+            <span className="max-sm:sr-only">Re-analyze</span>
           </Button>
         </div>
       </div>
