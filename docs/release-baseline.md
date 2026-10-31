@@ -41,7 +41,7 @@ Run on 2026-10-31 against the repository as committed plus the CI, README and do
 
 The backend suite creates and drops its own `repolens_test` database on the server named by `DATABASE_URL`; it never touches the `repolens` database.
 
-Browser behaviour (citation preview, conversation management, graph filters, mobile layouts) was verified by hand in headless Chrome during the UI/UX milestone. That is not automated and is not part of CI.
+Browser behaviour (citation preview, conversation management, graph navigation, mobile layouts, accessibility, error recovery) and live Groq and Gemini calls were verified end to end in Milestone 1, using headless Chrome with real input events. That is not automated and is not part of CI. See [verification-m1.md](verification-m1.md) for what was real, what used fixtures, and what was not verified.
 
 ### Findings from the clean-machine run
 
@@ -103,6 +103,8 @@ About 45 further tuning settings (timeouts, size limits, retrieval and retry par
 - **Language coverage.** Structure-aware chunking and the import graph cover Python, JavaScript, TypeScript and TSX only. Dynamic imports and runtime wiring are not resolved. Architecture areas and technologies are heuristic and marked "Inferred".
 - **AI answers can be wrong.** Citations are checked against what was retrieved, but the claims in the text are not verified. Semantic retrieval needs a Gemini key and is subject to its quotas; otherwise keyword matching is used.
 - **Chat details.** An answer still streaming is lost if you leave the Ask AI tab. Conversation titles saved by earlier versions are not rewritten. A conversation is only created when the first question is sent.
+- **Graph layout.** A dense, fully cyclic dependency graph is laid out as one long chain that is tiny at "fit to view". Zoom, find and the details panel still work.
+- **Keyword-only retrieval.** Without embeddings, conceptual questions can miss the relevant code; exact identifiers work well.
 - **Test coverage.** The frontend tests cover pure logic (graph model, citations, titles, statistics). There are no automated component or end-to-end browser tests.
 - **Housekeeping.** `cmd.txt` and `step.txt` at the repository root are personal development notes that are tracked in Git. `agent/`, `mcp/`, `ingestion/`, `packages/` and `infrastructure/` contain only `.gitkeep` placeholders.
 
