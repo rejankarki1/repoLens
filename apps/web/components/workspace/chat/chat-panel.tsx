@@ -22,6 +22,7 @@ import {
   type ConversationSummary,
   type SourceCitation,
 } from '@/lib/api/chat'
+import { ApiError } from '@/lib/api/client'
 import { useConversations, useSearchIndex } from '@/lib/api/hooks'
 import { makeTitle } from '@/lib/chat-title'
 import type { Repository } from '@/lib/types'
@@ -177,7 +178,13 @@ export function ChatPanel({ repo, initialConversationId = null }: { repo: Reposi
         if (isAbort(err)) {
           patchAnswer((m) => ({ ...m, status: 'stopped' }))
         } else {
-          const failure = err instanceof ChatError ? err : new ChatError('Something went wrong while answering.', 'failed')
+          // Creating the conversation throws an ApiError (e.g. the backend is unreachable) with a message worth showing.
+          const failure =
+            err instanceof ChatError
+              ? err
+              : err instanceof ApiError
+                ? new ChatError(err.message, err.status === 0 ? 'network' : 'failed')
+                : new ChatError('Something went wrong while answering.', 'failed')
           patchAnswer((m) => ({
             ...m,
             status: 'failed',
