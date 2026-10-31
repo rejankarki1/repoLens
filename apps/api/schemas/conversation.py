@@ -38,11 +38,21 @@ class MessageResponse(BaseModel):
     created_at: datetime | None
 
 
+class ConversationRename(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+
+
 class ConversationResponse(BaseModel):
     id: int
     repository_id: int | None
     title: str | None
     created_at: datetime
+    updated_at: datetime | None = None  # time of the latest message; set by the list endpoint
+    message_count: int = 0
+
+
+class ClearedResponse(BaseModel):
+    deleted: int
 
 
 class ConversationDetailResponse(ConversationResponse):

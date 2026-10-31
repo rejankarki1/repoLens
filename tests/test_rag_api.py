@@ -108,7 +108,7 @@ async def test_answer_is_grounded_cited_and_saved(api: dict) -> None:
     assert "do not follow" not in api["generator"].calls[0]["contents"][0]["parts"][0]["text"].lower()
     detail = (await api["client"].get(f"/repositories/{repo_id}/conversations/{conv_id}")).json()
     assert [m["role"] for m in detail["messages"]] == ["user", "assistant"]
-    assert detail["messages"][1]["citations"] == body["citations"] and detail["title"] == "How does hash_password work?"
+    assert detail["messages"][1]["citations"] == body["citations"] and detail["title"] == "How does hash_password work"
 
 
 async def test_invented_citations_and_paths_are_removed_or_flagged(api: dict) -> None:
@@ -226,10 +226,17 @@ async def test_unindexed_repository_is_409(api: dict) -> None:
     assert api["generator"].calls == []
 
 
-async def test_list_conversations(api: dict) -> None:
-    repo_id, conv_id = await setup_repo(api)
+async def test_list_conversations_hides_empty_ones_and_orders_by_activity(api: dict) -> None:
+    repo_id, first = await setup_repo(api)
+    second = (await api["client"].post(f"/repositories/{repo_id}/conversations")).json()["id"]
+    empty = (await api["client"].post(f"/repositories/{repo_id}/conversations")).json()["id"]
+    await ask(api, repo_id, first, "How does hash_password work?")
+    await ask(api, repo_id, second, "What does SessionStore do?")
+    await ask(api, repo_id, first, "And verified?")  # the first conversation is now the most recent
     listed = (await api["client"].get(f"/repositories/{repo_id}/conversations")).json()
-    assert [c["id"] for c in listed] == [conv_id]
+    assert [c["id"] for c in listed] == [first, second] and empty not in {c["id"] for c in listed}
+    assert [(c["title"], c["message_count"]) for c in listed] == [("How does hash_password work", 4), ("What does SessionStore do", 2)]
+    assert all(c["updated_at"] for c in listed)
 
 
 # --- streaming -----------------------------------------------------------------------------------------
@@ -386,7 +393,7 @@ def test_unknown_and_unlabelled_references_are_not_turned_into_citations() -> No
     final = rag.finalize_answer("See 【S7】 and url_safe.py and src/itsdangerous/url_safe.py for details.", sources)
     assert final.citations == [] and "S7" not in final.text
     assert any("cites no retrieved source" in w for w in final.warnings) and any("S7" in w for w in final.warnings)
-    assert rag.finalize_answer("Plain text mentioning S1 and (S1) and <S1>.", sources).citations == []
+    assert rag.finalize_answer("Plain text mentioning S1 and <S1> but no brackets.", sources).citations == []
 
 
 async def test_lenticular_marker_through_route_and_persistence(api: dict) -> None:
@@ -408,3 +415,121 @@ async def test_lenticular_marker_in_stream_matches_saved_message(api: dict) -> N
     assert not any("cites no retrieved source" in w for w in done["warnings"])
     saved = (await api["client"].get(f"/repositories/{repo_id}/conversations/{conv_id}")).json()["messages"][1]
     assert saved["content"] == done["assistant_message"]["content"] and saved["citations"] == done["citations"]
+
+
+# --- parenthesised citations: "(S3, S6)" ---------------------------------------------------------------------------
+
+
+def test_parenthesised_groups_of_real_sources_become_citations() -> None:
+    final = rag.finalize_answer("It stores sessions (S2, S1) and hashes passwords (S1).", _sources("a.py", "b.py"))
+    assert [c["id"] for c in final.citations] == ["S2", "S1"]
+    assert final.text == "It stores sessions [S2, S1] and hashes passwords [S1]."
+    assert not any("cites no retrieved source" in w for w in final.warnings)
+
+
+def test_parentheses_with_an_unknown_label_are_left_alone() -> None:
+    final = rag.finalize_answer("See the spec (S1, S9) and the note (S9) and (see S1).", _sources("a.py"))
+    assert final.citations == [] and final.text == "See the spec (S1, S9) and the note (S9) and (see S1)."
+
+
+def test_parenthesised_markers_are_stripped_from_history() -> None:
+    assert rag._strip_markers("Sessions live in memory (S3, S6) and expire [S2].") == "Sessions live in memory and expire."
+
+
+# --- titles --------------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("question", "title"), [
+    ("What does this project do and how is it structured?", "What does this project do and how is it structured"),
+    ("  hey,   please   explain the  auth flow.  Thanks a lot!", "Explain the auth flow"),
+    ("is this app deployed ?", "Is this app deployed"),
+    ("Where is the entry point? And how are routes registered?", "Where is the entry point"),
+    ("In URLSafeSerializerMixin.dump_payload, what exact condition determines whether compression is used?", "In URLSafeSerializerMixin.dump_payload, what exact…"),
+    ("x" * 100, "X" + "x" * 59 + "…"),
+    ("?", None),
+    ("   ", None),
+])
+def test_titles_are_deterministic_and_short(question: str, title: str | None) -> None:
+    assert rag.make_title(question) == title
+    assert rag.make_title(question) == rag.make_title(question)
+    assert title is None or len(title) <= rag.TITLE_MAX_CHARS + 1
+
+
+# --- rename, delete, clear, ownership -------------------------------------------------------------------------------
+
+
+async def test_rename_a_conversation(api: dict) -> None:
+    repo_id, conv_id = await setup_repo(api)
+    await ask(api, repo_id, conv_id, "How does hash_password work?")
+    renamed = await api["client"].patch(f"/repositories/{repo_id}/conversations/{conv_id}", json={"title": "  Password   hashing  "})
+    assert renamed.status_code == 200 and renamed.json()["title"] == "Password hashing"
+    assert (await api["client"].get(f"/repositories/{repo_id}/conversations/{conv_id}")).json()["title"] == "Password hashing"
+    await ask(api, repo_id, conv_id, "And verified?")  # a later question never overwrites a chosen title
+    assert (await api["client"].get(f"/repositories/{repo_id}/conversations/{conv_id}")).json()["title"] == "Password hashing"
+    for bad in ("", "   ", "x" * 256):
+        assert (await api["client"].patch(f"/repositories/{repo_id}/conversations/{conv_id}", json={"title": bad})).status_code == 422
+
+
+async def test_delete_a_conversation_removes_its_messages(api: dict) -> None:
+    repo_id, conv_id = await setup_repo(api)
+    other = (await api["client"].post(f"/repositories/{repo_id}/conversations")).json()["id"]
+    await ask(api, repo_id, conv_id, "How does hash_password work?")
+    await ask(api, repo_id, other, "What does SessionStore do?")
+    assert (await api["client"].delete(f"/repositories/{repo_id}/conversations/{conv_id}")).status_code == 204
+    assert (await api["client"].get(f"/repositories/{repo_id}/conversations/{conv_id}")).status_code == 404
+    assert (await api["client"].delete(f"/repositories/{repo_id}/conversations/{conv_id}")).status_code == 404
+    assert (await message_count(api)) == 2  # only the other conversation's pair is left
+    assert [c["id"] for c in (await api["client"].get(f"/repositories/{repo_id}/conversations")).json()] == [other]
+
+
+async def test_clear_history_is_limited_to_one_repository(api: dict) -> None:
+    repo_a, conv_a = await setup_repo(api, "octo/a")
+    repo_b, conv_b = await setup_repo(api, "octo/b")
+    await ask(api, repo_a, conv_a, "How does hash_password work?")
+    await ask(api, repo_b, conv_b, "How does hash_password work?")
+    assert (await api["client"].delete(f"/repositories/{repo_a}/conversations")).json() == {"deleted": 1}
+    assert (await api["client"].get(f"/repositories/{repo_a}/conversations")).json() == []
+    assert len((await api["client"].get(f"/repositories/{repo_b}/conversations")).json()) == 1
+    assert (await api["client"].delete(f"/repositories/{repo_a}/conversations")).json() == {"deleted": 0}
+    assert (await api["client"].delete("/repositories/999999/conversations")).status_code == 404
+
+
+async def test_conversations_of_another_user_are_invisible_and_untouchable(api: dict) -> None:
+    from apps.api.models.entities import Conversation, User
+
+    repo_id, mine = await setup_repo(api)
+    stranger = User(email="someone.else@example.test")
+    api["db"].add(stranger)
+    await api["db"].flush()
+    theirs = Conversation(user_id=stranger.id, repository_id=repo_id, title="Private")
+    api["db"].add(theirs)
+    await api["db"].commit()
+    await ask(api, repo_id, mine, "How does hash_password work?")
+    base = f"/repositories/{repo_id}/conversations"
+    assert [c["id"] for c in (await api["client"].get(base)).json()] == [mine]
+    assert (await api["client"].get(f"{base}/{theirs.id}")).status_code == 404
+    assert (await api["client"].patch(f"{base}/{theirs.id}", json={"title": "mine now"})).status_code == 404
+    assert (await api["client"].delete(f"{base}/{theirs.id}")).status_code == 404
+    assert (await ask(api, repo_id, theirs.id, "How does hash_password work?")).status_code == 404
+    await api["client"].delete(base)  # clearing my history leaves theirs alone
+    assert (await api["db"].get(Conversation, theirs.id)) is not None
+
+
+async def test_reads_do_not_create_the_local_user(api: dict) -> None:
+    from apps.api.models.entities import User
+
+    repo_id = await new_repository(api["db"])
+    assert (await api["client"].get(f"/repositories/{repo_id}/conversations")).json() == []
+    assert (await api["db"].execute(select(func.count()).select_from(User))).scalar_one() == 0
+
+
+async def test_deleting_a_conversation_during_an_answer_is_a_clean_404(api: dict) -> None:
+    repo_id, conv_id = await setup_repo(api)
+
+    async def gone(system, contents, *, attempts=2):
+        await api["client"].delete(f"/repositories/{repo_id}/conversations/{conv_id}")
+        return GenerationResult("It hashes [S1].")
+
+    api["generator"].generate = gone
+    response = await ask(api, repo_id, conv_id, "How does hash_password work?")
+    assert response.status_code == 404 and await message_count(api) == 0

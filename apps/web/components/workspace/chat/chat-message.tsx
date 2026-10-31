@@ -1,45 +1,16 @@
 'use client'
 
 import Link from 'next/link'
-import { memo, useMemo } from 'react'
+import { memo, useMemo, type MouseEvent } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AlertCircle, FileCode2, OctagonX, RotateCcw, Sparkles, TriangleAlert } from 'lucide-react'
 import { CodeBlock, formatLineRange } from '@/components/workspace/code-viewer'
 import { Button } from '@/components/ui/button'
 import { describeChatError, type ChatTurnMessage, type SourceCitation } from '@/lib/api/chat'
+import { CITE_SCHEME, citationHref, isStaleCitation, linkCitations, shouldPreview } from '@/lib/chat-citations'
 import { languageFromFence } from '@/lib/highlight'
 import { cn } from '@/lib/utils'
-
-const CITE_SCHEME = 'cite:'
-// \u200b-\u200d, \u2060 and \ufeff are zero-width characters models sometimes put inside a marker.
-const GAP = '[\\s\\u200b-\\u200d\\u2060\\ufeff]*'
-// Brackets may be ASCII [ ] or the full-width \u3010 \u3011 / \uff3b \uff3d some models emit; the backend normalizes them on save.
-const MARKER = new RegExp(`[\\[\\u3010\\uff3b]${GAP}(S\\d+(?:${GAP}[,;]${GAP}S\\d+)*)${GAP}[\\]\\u3011\\uff3d]`, 'g')
-const CODE_SPANS = /(```[\s\S]*?```|`[^`\n]*`)/
-
-/**
- * Turns `[S1]` / `[S1, S2]` into links with a private `cite:` scheme, but only for markers that match a
- * source the backend returned. Anything else is dropped, so the UI never shows a citation the server
- * did not validate. Fenced and inline code is left untouched.
- */
-export function linkCitations(text: string, known: ReadonlySet<string>): string {
-  return text
-    .split(CODE_SPANS)
-    .map((part, i) =>
-      i % 2 === 1
-        ? part
-        : part.replace(MARKER, (_, group: string) => {
-            const links = (group.match(/S\d+/g) ?? []).filter((id) => known.has(id)).map((id) => `[${id}](${CITE_SCHEME}${id})`)
-            return links.join(' ')
-          }),
-    )
-    .join('')
-}
-
-export function citationHref(repoId: string, c: SourceCitation): string {
-  return `/repos/${repoId}?tab=code&file=${encodeURIComponent(c.path)}&lines=${formatLineRange(c.startLine, c.endLine)}`
-}
 
 function describeCitation(c: SourceCitation, stale: boolean): string {
   const where = `${c.path}, lines ${formatLineRange(c.startLine, c.endLine)}`
@@ -47,15 +18,36 @@ function describeCitation(c: SourceCitation, stale: boolean): string {
   return stale ? `${where}${symbol}. From an earlier snapshot; the lines may have moved.` : `${where}${symbol}`
 }
 
+type PreviewHandler = (citation: SourceCitation) => void
+
+/** A plain click opens the in-page preview; modified clicks and middle clicks stay normal link navigation. */
+function previewOnClick(citation: SourceCitation, onPreview: PreviewHandler | undefined) {
+  return (e: MouseEvent) => {
+    if (!onPreview || !shouldPreview(e.nativeEvent)) return
+    e.preventDefault()
+    onPreview(citation)
+  }
+}
+
 /** Short pill used inline in the answer: the marker, e.g. "S2". */
-function InlineCitation({ repoId, citation, stale }: { repoId: string; citation: SourceCitation; stale: boolean }) {
+function InlineCitation({
+  repoId, citation, stale, active, onPreview,
+}: {
+  repoId: string
+  citation: SourceCitation
+  stale: boolean
+  active: boolean
+  onPreview?: PreviewHandler
+}) {
   return (
     <Link
       href={citationHref(repoId, citation)}
-      title={describeCitation(citation, stale)}
+      onClick={previewOnClick(citation, onPreview)}
+      title={`${describeCitation(citation, stale)}. Click to preview, ctrl/cmd-click to open the Code Explorer.`}
       aria-label={`Source ${citation.id}: ${describeCitation(citation, stale)}`}
       className={cn(
         'mx-0.5 inline-flex h-[1.15rem] min-w-[1.6rem] items-center justify-center rounded border px-1 align-baseline font-mono text-[0.7rem] leading-none no-underline transition-colors',
+        active && 'ring-2 ring-primary/50',
         stale
           ? 'border-warning/50 bg-warning/10 text-warning hover:bg-warning/20'
           : 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/20',
@@ -66,15 +58,26 @@ function InlineCitation({ repoId, citation, stale }: { repoId: string; citation:
   )
 }
 
-export function CitationChip({ repoId, citation, stale }: { repoId: string; citation: SourceCitation; stale: boolean }) {
+export function CitationChip({
+  repoId, citation, stale, active, onPreview,
+}: {
+  repoId: string
+  citation: SourceCitation
+  stale: boolean
+  active?: boolean
+  onPreview?: PreviewHandler
+}) {
   const range = formatLineRange(citation.startLine, citation.endLine)
   return (
     <Link
       href={citationHref(repoId, citation)}
-      title={describeCitation(citation, stale)}
+      onClick={previewOnClick(citation, onPreview)}
+      title={`${describeCitation(citation, stale)}. Click to preview, ctrl/cmd-click to open the Code Explorer.`}
+      aria-pressed={active}
       className={cn(
         'inline-flex max-w-full items-center gap-1.5 rounded-md border bg-muted/50 px-2 py-1 font-mono text-xs transition-colors hover:bg-accent',
-        stale ? 'border-warning/50' : 'border-border hover:border-primary/40',
+        active && 'border-primary bg-accent',
+        !active && (stale ? 'border-warning/50' : 'border-border hover:border-primary/40'),
       )}
     >
       <span className="shrink-0 rounded bg-background px-1 text-[0.65rem] text-primary">{citation.id}</span>
@@ -92,13 +95,17 @@ interface MessageProps {
   currentCommit: string | null
   /** The failed question's retry, offered only on the latest failed answer */
   onRetry?: () => void
+  /** Open a validated source in the preview panel; without it citations are plain links to the Code Explorer */
+  onPreview?: (citation: SourceCitation, messageId: string) => void
+  /** The source currently shown in the preview (highlighted in the answer) */
+  previewed?: { messageId: string; citationId: string } | null
 }
 
-function isStale(c: SourceCitation, currentCommit: string | null) {
-  return !!currentCommit && !!c.commitSha && !c.commitSha.startsWith(currentCommit)
-}
+const isStale = isStaleCitation
 
-function AnswerBody({ message, repoId, currentCommit }: Omit<MessageProps, 'onRetry'>) {
+function AnswerBody({
+  message, repoId, currentCommit, onPreview, previewed,
+}: Omit<MessageProps, 'onRetry' | 'onPreview'> & { onPreview?: PreviewHandler }) {
   // While streaming, markers resolve against the retrieved sources; afterwards, against the saved citations.
   const sources = message.status === 'complete' ? message.citations : (message.retrieval?.sources ?? message.citations)
   const byId = useMemo(() => new Map(sources.map((c) => [c.id, c])), [sources])
@@ -118,7 +125,15 @@ function AnswerBody({ message, repoId, currentCommit }: Omit<MessageProps, 'onRe
       a: ({ href, children }) => {
         if (href?.startsWith(CITE_SCHEME)) {
           const citation = byId.get(href.slice(CITE_SCHEME.length))
-          return citation ? <InlineCitation repoId={repoId} citation={citation} stale={isStale(citation, currentCommit)} /> : null
+          return citation ? (
+            <InlineCitation
+              repoId={repoId}
+              citation={citation}
+              stale={isStale(citation, currentCommit)}
+              active={previewed?.messageId === message.id && previewed.citationId === citation.id}
+              onPreview={onPreview}
+            />
+          ) : null
         }
         // Only absolute web links are clickable; anything else renders as plain text.
         if (href && /^https?:\/\//i.test(href)) {
@@ -137,7 +152,7 @@ function AnswerBody({ message, repoId, currentCommit }: Omit<MessageProps, 'onRe
         </div>
       ),
     }),
-    [byId, repoId, currentCommit],
+    [byId, repoId, currentCommit, onPreview, previewed, message.id],
   )
 
   return (
@@ -150,7 +165,9 @@ function AnswerBody({ message, repoId, currentCommit }: Omit<MessageProps, 'onRe
   )
 }
 
-function ChatMessageViewBase({ message, repoId, currentCommit, onRetry }: MessageProps) {
+function ChatMessageViewBase({ message, repoId, currentCommit, onRetry, onPreview: openPreview, previewed }: MessageProps) {
+  const messageId = message.id
+  const onPreview = useMemo(() => (openPreview ? (c: SourceCitation) => openPreview(c, messageId) : undefined), [openPreview, messageId])
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
@@ -178,7 +195,9 @@ function ChatMessageViewBase({ message, repoId, currentCommit, onRetry }: Messag
           </p>
         ) : (
           <>
-            {message.content && <AnswerBody message={message} repoId={repoId} currentCommit={currentCommit} />}
+            {message.content && (
+              <AnswerBody message={message} repoId={repoId} currentCommit={currentCommit} onPreview={onPreview} previewed={previewed} />
+            )}
             {status === 'streaming' && (
               <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground" role="status">
                 <Dots />
@@ -245,7 +264,14 @@ function ChatMessageViewBase({ message, repoId, currentCommit, onRetry }: Messag
             <p className="text-xs text-muted-foreground">Sources</p>
             <div className="flex flex-wrap gap-2">
               {message.citations.map((c) => (
-                <CitationChip key={c.id} repoId={repoId} citation={c} stale={isStale(c, currentCommit)} />
+                <CitationChip
+                  key={c.id}
+                  repoId={repoId}
+                  citation={c}
+                  stale={isStale(c, currentCommit)}
+                  active={previewed?.messageId === message.id && previewed.citationId === c.id}
+                  onPreview={onPreview}
+                />
               ))}
             </div>
           </div>

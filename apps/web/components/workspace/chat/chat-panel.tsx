@@ -2,22 +2,30 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useSWRConfig } from 'swr'
-import { ArrowUp, History, Info, Loader2, MessageSquarePlus, Square } from 'lucide-react'
+import { ArrowUp, History, Info, MessageSquarePlus, Square } from 'lucide-react'
 import { ChatMessageView } from '@/components/workspace/chat/chat-message'
+import { ConversationList } from '@/components/workspace/chat/conversation-list'
+import { SourcePreview } from '@/components/workspace/chat/source-preview'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import {
   ChatError,
+  clearConversations,
   createConversation,
+  deleteConversation,
   getConversation,
+  renameConversation,
   streamQuestion,
   type ChatTurnMessage,
   type ConversationSummary,
+  type SourceCitation,
 } from '@/lib/api/chat'
 import { useConversations, useSearchIndex } from '@/lib/api/hooks'
+import { makeTitle } from '@/lib/chat-title'
 import type { Repository } from '@/lib/types'
+import { useMediaQuery } from '@/lib/use-media-query'
 import { cn } from '@/lib/utils'
 
 /** Mirrors the backend's `rag_question_max_chars` default. */
@@ -34,14 +42,31 @@ function isAbort(err: unknown) {
   return err instanceof DOMException && err.name === 'AbortError'
 }
 
-export function ChatPanel({ repo }: { repo: Repository }) {
+/** Keeps the open conversation in the address (`?tab=ask&c=12`) without adding history entries, so Back leaves the tab. */
+function writeConversationToUrl(id: number | null) {
+  const url = new URL(window.location.href)
+  if (id === null) url.searchParams.delete('c')
+  else url.searchParams.set('c', String(id))
+  window.history.replaceState(window.history.state, '', url)
+}
+
+function messageOf(err: unknown, fallback: string) {
+  return err instanceof Error ? err.message : fallback
+}
+
+export function ChatPanel({ repo, initialConversationId = null }: { repo: Repository; initialConversationId?: number | null }) {
   const { mutate } = useSWRConfig()
   const { data: history, error: historyError, isLoading: historyLoading } = useConversations(repo.id)
   const { data: index } = useSearchIndex(repo)
 
-  const [activeId, setActiveId] = useState<number | null>(null)
+  const [activeId, setActiveId] = useState<number | null>(initialConversationId)
+  const startId = useRef(initialConversationId)
+  const [draftTitle, setDraftTitle] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ messageId: string; citation: SourceCitation } | null>(null)
+  const sideBySide = useMediaQuery('(min-width: 1280px)')
+  const tablet = useMediaQuery('(min-width: 640px)')
   const [messages, setMessages] = useState<ChatTurnMessage[]>([])
-  const [loadingConversation, setLoadingConversation] = useState(false)
+  const [loadingConversation, setLoadingConversation] = useState(initialConversationId !== null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
@@ -69,6 +94,26 @@ export function ChatPanel({ repo }: { repo: Repository }) {
   }, [messages])
 
   const refreshList = useCallback(() => mutate(['conversations', repo.id]), [mutate, repo.id])
+
+  // Opening `?tab=ask&c=12` (a bookmark, a refresh, or Back from the Code Explorer) shows that conversation again.
+  useEffect(() => {
+    const id = startId.current
+    if (id === null) return
+    const run = runRef.current
+    getConversation(repo.id, id)
+      .then((loaded) => {
+        if (runRef.current === run) setMessages(loaded.messages)
+      })
+      .catch((err) => {
+        if (runRef.current !== run) return
+        setLoadError(messageOf(err, 'Could not load this conversation.'))
+        setActiveId(null)
+        writeConversationToUrl(null)
+      })
+      .finally(() => {
+        if (runRef.current === run) setLoadingConversation(false)
+      })
+  }, [repo.id])
 
   const send = useCallback(
     async (raw: string, options?: { dropLastTurn?: boolean }) => {
@@ -105,7 +150,8 @@ export function ChatPanel({ repo }: { repo: Repository }) {
           if (runRef.current !== run) return
           conversationId = created.id
           setActiveId(created.id)
-          void refreshList()
+          setDraftTitle(makeTitle(question))
+          writeConversationToUrl(created.id)
         }
         await streamQuestion(
           repo.id,
@@ -153,11 +199,14 @@ export function ChatPanel({ repo }: { repo: Repository }) {
     invalidateRun()
     setBusy(false)
     setActiveId(null)
+    setDraftTitle(null)
+    setPreview(null)
     setMessages([])
     setLoadError(null)
     setFormError(null)
     setDraft('')
     setHistoryOpen(false)
+    writeConversationToUrl(null)
   }, [invalidateRun])
 
   const openConversation = useCallback(
@@ -168,6 +217,9 @@ export function ChatPanel({ repo }: { repo: Repository }) {
       const run = runRef.current
       setBusy(false)
       setActiveId(summary.id)
+      setDraftTitle(null)
+      setPreview(null)
+      writeConversationToUrl(summary.id)
       setMessages([])
       setLoadError(null)
       setFormError(null)
@@ -187,6 +239,44 @@ export function ChatPanel({ repo }: { repo: Repository }) {
     },
     [activeId, invalidateRun, loadError, refreshList, repo.id],
   )
+
+  const renameChat = useCallback(
+    async (c: ConversationSummary, title: string) => {
+      try {
+        await renameConversation(repo.id, c.id, title)
+      } catch (err) {
+        throw new Error(messageOf(err, 'Could not rename this chat.'))
+      }
+      await refreshList()
+    },
+    [refreshList, repo.id],
+  )
+
+  const deleteChat = useCallback(
+    async (c: ConversationSummary) => {
+      try {
+        await deleteConversation(repo.id, c.id)
+      } catch (err) {
+        throw new Error(messageOf(err, 'Could not delete this chat.'))
+      }
+      if (c.id === activeId) startNewChat()
+      await refreshList()
+    },
+    [activeId, refreshList, repo.id, startNewChat],
+  )
+
+  const clearHistory = useCallback(async () => {
+    try {
+      await clearConversations(repo.id)
+    } catch (err) {
+      throw new Error(messageOf(err, 'Could not clear the history.'))
+    }
+    startNewChat()
+    await refreshList()
+  }, [refreshList, repo.id, startNewChat])
+
+  const openPreview = useCallback((citation: SourceCitation, messageId: string) => setPreview({ messageId, citation }), [])
+  const closePreview = useCallback(() => setPreview(null), [])
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -214,8 +304,12 @@ export function ChatPanel({ repo }: { repo: Repository }) {
       activeId={activeId}
       onNew={startNewChat}
       onOpen={openConversation}
+      onRename={renameChat}
+      onDelete={deleteChat}
+      onClear={clearHistory}
     />
   )
+  const activeTitle = (activeId !== null ? history?.find((c) => c.id === activeId)?.title : null) ?? draftTitle
 
   return (
     <div className="flex h-full min-h-0">
@@ -232,15 +326,18 @@ export function ChatPanel({ repo }: { repo: Repository }) {
       </Sheet>
 
       <section className="flex min-w-0 flex-1 flex-col" aria-label="Ask AI">
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 lg:hidden">
-          <Button variant="ghost" size="sm" onClick={() => setHistoryOpen(true)}>
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+          <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setHistoryOpen(true)}>
             <History aria-hidden="true" />
             History
           </Button>
-          <Button variant="ghost" size="sm" onClick={startNewChat}>
+          <Button variant="ghost" size="sm" className="lg:hidden" onClick={startNewChat}>
             <MessageSquarePlus aria-hidden="true" />
             New chat
           </Button>
+          <h2 className="min-w-0 flex-1 truncate text-sm font-medium max-lg:text-right max-lg:text-xs max-lg:text-muted-foreground" title={activeTitle ?? undefined}>
+            {activeTitle ?? (activeId === null ? 'New chat' : 'Conversation')}
+          </h2>
         </div>
 
         <div
@@ -274,6 +371,8 @@ export function ChatPanel({ repo }: { repo: Repository }) {
                   repoId={repo.id}
                   currentCommit={repo.indexedCommit}
                   onRetry={i === messages.length - 1 ? retry : undefined}
+                  onPreview={openPreview}
+                  previewed={preview ? { messageId: preview.messageId, citationId: preview.citation.id } : null}
                 />
               ))
             )}
@@ -327,6 +426,27 @@ export function ChatPanel({ repo }: { repo: Repository }) {
           </div>
         </div>
       </section>
+
+      {preview && sideBySide && (
+        <aside className="flex w-[44%] max-w-[46rem] min-w-[26rem] shrink-0 border-l border-border" aria-label="Source preview">
+          <div className="min-w-0 flex-1">
+            <SourcePreview repo={repo} citation={preview.citation} onClose={closePreview} closeOnEscape />
+          </div>
+        </aside>
+      )}
+      {preview && !sideBySide && (
+        <Sheet open onOpenChange={(open) => !open && closePreview()}>
+          <SheetContent
+            side={tablet ? 'right' : 'bottom'}
+            showCloseButton={false}
+            className="gap-0 p-0 data-[side=bottom]:h-[88dvh] data-[side=bottom]:rounded-t-xl data-[side=right]:sm:max-w-2xl"
+          >
+            <SheetTitle className="sr-only">Source preview: {preview.citation.path}</SheetTitle>
+            <SheetDescription className="sr-only">The cited lines of the file, highlighted</SheetDescription>
+            <SourcePreview repo={repo} citation={preview.citation} onClose={closePreview} closeOnEscape={false} />
+          </SheetContent>
+        </Sheet>
+      )}
     </div>
   )
 }
@@ -382,55 +502,5 @@ function EmptyState({ repo, disabled, onPick }: { repo: Repository; disabled: bo
         ))}
       </ul>
     </div>
-  )
-}
-
-function ConversationList({
-  conversations,
-  loading,
-  failed,
-  activeId,
-  onNew,
-  onOpen,
-}: {
-  conversations: ConversationSummary[] | undefined
-  loading: boolean
-  failed: boolean
-  activeId: number | null
-  onNew: () => void
-  onOpen: (c: ConversationSummary) => void
-}) {
-  return (
-    <>
-      <div className="p-2">
-        <Button variant="outline" size="sm" className="w-full justify-start" onClick={onNew}>
-          <MessageSquarePlus aria-hidden="true" />
-          New chat
-        </Button>
-      </div>
-      <ul className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        {loading && (
-          <li className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-            Loading conversations…
-          </li>
-        )}
-        {failed && <li className="px-2 py-3 text-xs text-destructive">Could not load conversations.</li>}
-        {!loading && !failed && conversations?.length === 0 && (
-          <li className="px-2 py-3 text-xs text-muted-foreground">No conversations yet. Ask a question to start one.</li>
-        )}
-        {conversations?.map((c) => (
-          <li key={c.id}>
-            <button
-              onClick={() => onOpen(c)}
-              aria-current={activeId === c.id ? 'true' : undefined}
-              className={cn('w-full truncate rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent', activeId === c.id && 'bg-accent font-medium')}
-            >
-              {c.title}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </>
   )
 }

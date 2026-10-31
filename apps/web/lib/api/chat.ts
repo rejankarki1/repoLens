@@ -32,6 +32,8 @@ interface ApiConversation {
   repository_id: number | null
   title: string | null
   created_at: string
+  updated_at?: string | null
+  message_count?: number
 }
 
 interface ApiAnswer {
@@ -75,8 +77,12 @@ export interface SourceCitation {
 
 export interface ConversationSummary {
   id: number
+  /** Never empty: the saved title, or "Untitled chat" for a conversation that has none yet. */
   title: string
   createdAt: string
+  /** Time of the latest message (the list endpoint only). */
+  updatedAt: string | null
+  messageCount: number
 }
 
 export interface RetrievalInfo {
@@ -150,6 +156,8 @@ const toConversation = (c: ApiConversation): ConversationSummary => ({
   id: c.id,
   title: c.title?.trim() || 'Untitled chat',
   createdAt: c.created_at,
+  updatedAt: c.updated_at ?? null,
+  messageCount: c.message_count ?? 0,
 })
 
 const base = (repoId: string) => `${API_URL}/repositories/${encodeURIComponent(repoId)}/conversations`
@@ -162,7 +170,8 @@ async function detailOf(response: Response): Promise<string> {
   return `Request failed (${response.status})`
 }
 
-async function json<T>(url: string, init?: RequestInit): Promise<T> {
+/** A request that must succeed; failures become an `ApiError` with the server's message. */
+async function send(url: string, init?: RequestInit): Promise<Response> {
   let response: Response
   try {
     response = await fetch(url, init)
@@ -170,7 +179,11 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
     throw new ApiError(0, `Could not reach the RepoLens API at ${API_URL}. Is the backend running?`)
   }
   if (!response.ok) throw new ApiError(response.status, await detailOf(response))
-  return response.json() as Promise<T>
+  return response
+}
+
+async function json<T>(url: string, init?: RequestInit): Promise<T> {
+  return (await send(url, init)).json() as Promise<T>
 }
 
 /* ------------------------------- Conversations ------------------------------- */
@@ -186,6 +199,26 @@ export async function getConversation(repoId: string, id: number): Promise<{ sum
 
 export async function createConversation(repoId: string): Promise<ConversationSummary> {
   return toConversation(await json<ApiConversation>(base(repoId), { method: 'POST' }))
+}
+
+export async function renameConversation(repoId: string, id: number, title: string): Promise<ConversationSummary> {
+  return toConversation(
+    await json<ApiConversation>(`${base(repoId)}/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    }),
+  )
+}
+
+export async function deleteConversation(repoId: string, id: number): Promise<void> {
+  await send(`${base(repoId)}/${id}`, { method: 'DELETE' })
+}
+
+/** Deletes this repository's whole chat history; resolves with how many conversations went. */
+export async function clearConversations(repoId: string): Promise<number> {
+  const response = await send(base(repoId), { method: 'DELETE' })
+  return ((await response.json()) as { deleted: number }).deleted
 }
 
 export async function getSearchIndex(repoId: string): Promise<ApiSearchIndex> {

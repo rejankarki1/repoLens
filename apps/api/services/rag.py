@@ -71,6 +71,9 @@ _OPEN, _CLOSE = "[\\[\u3010\uff3b]", "[\\]\u3011\uff3d]"
 _MARKER_PATTERN = rf"{_OPEN}{_GAP}(S\d+(?:{_GAP}[,;]{_GAP}S\d+)*){_GAP}{_CLOSE}"
 _MARKER_GROUP = re.compile(_MARKER_PATTERN)
 _LABEL = re.compile(r"S\d+")
+# "(S3, S6)": accepted only when every label is a retrieved source, so ordinary parentheses are never touched.
+_PAREN_PATTERN = rf"\(\s*(S\d+(?:{_GAP}[,;]{_GAP}S\d+)*)\s*\)"
+_PAREN_GROUP = re.compile(_PAREN_PATTERN)
 _FILE_MENTION = re.compile(
     r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:py|pyi|ts|tsx|js|jsx|mjs|cjs|json|md|sql|toml|ya?ml|css|html|sh|txt|cfg|ini|env))\b"
 )
@@ -134,13 +137,23 @@ async def default_user_id(db: AsyncSession) -> int:
     return user_id
 
 
-async def get_conversation(db: AsyncSession, repository_id: int, conversation_id: int) -> Conversation:
-    """A conversation of this repository, or `ConversationNotFoundError` (also for another repository's)."""
-    conversation = (
-        await db.execute(
-            select(Conversation).where(Conversation.id == conversation_id, Conversation.repository_id == repository_id)
-        )
-    ).scalar_one_or_none()
+async def find_default_user_id(db: AsyncSession) -> int | None:
+    """The local user's id if it exists, without creating it (reads must not write)."""
+    return (await db.execute(select(User.id).where(User.email == DEFAULT_USER_EMAIL))).scalar_one_or_none()
+
+
+async def get_conversation(
+    db: AsyncSession, repository_id: int, conversation_id: int, user_id: int | None = None
+) -> Conversation:
+    """A conversation of this repository, or `ConversationNotFoundError` (also for another repository's).
+
+    Pass `user_id` to also require that the conversation belongs to that user; the routes always do. Until
+    authentication exists the user is the local default one (see `docs/rag.md`, "Ownership").
+    """
+    query = select(Conversation).where(Conversation.id == conversation_id, Conversation.repository_id == repository_id)
+    if user_id is not None:
+        query = query.where(Conversation.user_id == user_id)
+    conversation = (await db.execute(query)).scalar_one_or_none()
     if conversation is None:
         raise ConversationNotFoundError(f"Conversation {conversation_id} not found in repository {repository_id}")
     return conversation
@@ -150,7 +163,37 @@ async def get_conversation(db: AsyncSession, repository_id: int, conversation_id
 
 
 def _strip_markers(text: str) -> str:
-    return re.sub(rf"{_GAP}{_MARKER_PATTERN}", "", text)
+    text = re.sub(rf"{_GAP}{_MARKER_PATTERN}", "", text)
+    return re.sub(rf"{_GAP}{_PAREN_PATTERN}", "", text)
+
+
+TITLE_MAX_CHARS = 60
+_GREETING = re.compile(r"^(?:(?:hi|hello|hey)\b[,!.]?\s+)?(?:please\b[,]?\s+)?", re.IGNORECASE)
+_FIRST_SENTENCE = re.compile(r"^(.{12,}?[.?!])(?:\s|$)")
+
+
+def make_title(question: str) -> str | None:
+    """A short, deterministic conversation title from the first question (no model call).
+
+    Whitespace is collapsed, a leading greeting or "please" is dropped, the first sentence is used when the
+    question has several, trailing punctuation is removed, and the result is cut at a word boundary. The same
+    rules exist in the web app (`lib/chat-title.ts`) so a title looks the same
+    before and after it is saved.
+    """
+    text = re.sub(r"\s+", " ", question).strip()
+    text = _GREETING.sub("", text, count=1).strip()
+    sentence = _FIRST_SENTENCE.match(text)
+    if sentence:
+        text = sentence.group(1)
+    text = text.rstrip(" .?!,;:")
+    if not text:
+        return None
+    text = text[0].upper() + text[1:]
+    if len(text) > TITLE_MAX_CHARS:
+        cut = text[:TITLE_MAX_CHARS]
+        space = cut.rfind(" ")
+        text = (cut[:space] if space >= TITLE_MAX_CHARS - 20 else cut).rstrip(" ,;:-") + "…"
+    return text
 
 
 def _history(rows: Sequence[Message], settings: Settings) -> list[dict[str, Any]]:
@@ -275,7 +318,14 @@ def finalize_answer(raw: str, sources: Sequence[Source]) -> FinalAnswer:
         cited.extend(label for label in valid if label not in cited)
         return f"[{', '.join(valid)}]" if valid else ""
 
-    text = _MARKER_GROUP.sub(keep_valid, raw).strip()
+    def keep_valid_parens(match: re.Match[str]) -> str:
+        labels = _LABEL.findall(match.group(1))
+        if not all(label in by_label for label in labels):
+            return match.group(0)
+        cited.extend(label for label in labels if label not in cited)
+        return f"[{', '.join(labels)}]"
+
+    text = _PAREN_GROUP.sub(keep_valid_parens, _MARKER_GROUP.sub(keep_valid, raw)).strip()
     text = re.sub(r" +([.,;:])", r"\1", re.sub(r"[ \t]{2,}", " ", text))
     warnings: list[str] = []
     if dropped:
@@ -303,7 +353,7 @@ async def save_exchange(db: AsyncSession, conversation_id: int, question: str, a
     await db.flush()  # the user message gets the lower id, so history keeps its order
     conversation = await db.get(Conversation, conversation_id)
     if conversation is not None and not conversation.title:
-        conversation.title = _clean(question.splitlines()[0] if question.strip() else "")[:80] or None
+        conversation.title = make_title(question)
     await db.commit()
     return user_message, assistant_message
 
