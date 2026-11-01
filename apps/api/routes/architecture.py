@@ -4,11 +4,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from rq import Queue
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import Settings
+from apps.api.core.auth import settings_dep
 from apps.api.core.database import get_db
+from apps.api.core.limits import get_limiter, guest_read_limit
 from apps.api.core.queue import enqueue_architecture, get_queue
 from apps.api.schemas.architecture import AnalysisStatus, ArchitectureResponse, NodeDetailResponse, QueueResponse
 from apps.api.services.access import RepoAccess, member_write, read_access
 from apps.api.services.architecture import store
+from apps.api.services.quota import refund_hourly, reserve_hourly
+from apps.api.services.rate_limit import Limiter
 
 router = APIRouter(tags=["architecture"])
 
@@ -21,11 +26,18 @@ async def request_architecture_analysis(
     db: AsyncSession = Depends(get_db),
     queue: Queue = Depends(get_queue),
     access: RepoAccess = Depends(member_write),
+    settings: Settings = Depends(settings_dep),
+    limiter: Limiter = Depends(get_limiter),
 ) -> QueueResponse:
     """Queue an analysis of the repository's current ingested commit (safe to repeat).
 
     202 when a job was queued or one is already running; 200 when the stored result is already current.
     """
+    await reserve_hourly(
+        limiter, "architecture", access.user_id, settings.architecture_hourly_limit,
+        f"You have requested {settings.architecture_hourly_limit} analyses in the last hour.",
+    )
+    enqueued = False
     try:
         status, enqueued = await store.queue_analysis(
             db, repository_id, lambda: enqueue_architecture(queue, repository_id), force=force
@@ -36,13 +48,19 @@ async def request_architecture_analysis(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except store.EnqueueError as exc:
         raise HTTPException(status_code=503, detail="Could not queue the analysis job; please try again") from exc
+    finally:
+        if not enqueued:
+            await refund_hourly(limiter, "architecture", access.user_id)
     response.status_code = 202 if enqueued or status.status in ("queued", "running") else 200
     return QueueResponse(analysis=status, enqueued=enqueued)
 
 
 @router.get("/repositories/{repository_id}/architecture/status", response_model=AnalysisStatus)
 async def get_architecture_status(
-    repository_id: int, db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(read_access)
+    repository_id: int,
+    db: AsyncSession = Depends(get_db),
+    access: RepoAccess = Depends(read_access),
+    _guest_limit: None = Depends(guest_read_limit),
 ) -> AnalysisStatus:
     """Cheap status of the latest attempt and the freshness of the stored result (poll this while queued/running)."""
     try:
@@ -53,7 +71,10 @@ async def get_architecture_status(
 
 @router.get("/repositories/{repository_id}/architecture", response_model=ArchitectureResponse)
 async def get_architecture(
-    repository_id: int, db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(read_access)
+    repository_id: int,
+    db: AsyncSession = Depends(get_db),
+    access: RepoAccess = Depends(read_access),
+    _guest_limit: None = Depends(guest_read_limit),
 ) -> ArchitectureResponse:
     """The high-level view (modules and the dependencies between them) of the last completed analysis.
 
@@ -72,9 +93,10 @@ async def get_architecture(
 @router.get("/repositories/{repository_id}/architecture/nodes", response_model=NodeDetailResponse)
 async def get_architecture_node(
     repository_id: int,
-    id: str = Query(min_length=1, max_length=1100, description='A node id from the graph: "module:<dir>" or "file:<path>"'),
+    id: str = Query(min_length=1, max_length=1100, pattern=r"^[^\x00]*$", description='A node id from the graph: "module:<dir>" or "file:<path>"'),
     db: AsyncSession = Depends(get_db),
     access: RepoAccess = Depends(read_access),
+    _guest_limit: None = Depends(guest_read_limit),
 ) -> NodeDetailResponse:
     """File-level detail for one module (its files and their dependencies) or one file."""
     try:

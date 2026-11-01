@@ -255,7 +255,9 @@ export async function streamQuestion(
 
   if (!response.ok) {
     const retryAfter = Number(response.headers.get('Retry-After'))
-    throw new ChatError(await detailOf(response), httpCode(response.status), retryAfter > 0 ? retryAfter : null)
+    // RepoLens's own limits (daily, burst, shared budget...) name themselves; the provider's 429 does not.
+    const code = response.status === 429 && response.headers.get('X-RateLimit-Scope') ? 'quota' : httpCode(response.status)
+    throw new ChatError(await detailOf(response), code, retryAfter > 0 ? retryAfter : null)
   }
   if (!response.body) throw new ChatError('The server sent no answer.', 'interrupted')
 
@@ -317,6 +319,8 @@ export function describeChatError(err: { code: string; message: string; retryAft
       return err.retryAfter
         ? `The AI provider is rate limiting requests. Try again in about ${formatWait(err.retryAfter)}.`
         : 'The AI provider is rate limiting requests. Wait a moment and try again.'
+    case 'quota':
+      return err.message // the server says which limit was reached and when it resets
     case 'not_found':
       return 'This conversation no longer exists. Start a new chat.'
     case 'not_ready':

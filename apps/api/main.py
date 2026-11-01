@@ -17,7 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.config import get_settings
 from apps.api.core.database import engine, get_db, session_factory
 from apps.api.core.queue import get_queue
+from apps.api.core.limits import SCOPE_HEADER
 from apps.api.core.redis import get_redis, redis_lifespan
+from apps.api.core.security import SecurityHeadersMiddleware, install_log_redaction, validate_production_settings
 from apps.api.jobs.maintenance import sweeper_loop
 from apps.api.routes.architecture import router as architecture_router
 from apps.api.routes.auth import router as auth_router
@@ -34,7 +36,9 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage Redis startup and release service connections on shutdown."""
+    """Refuse to start with an unsafe production configuration, manage Redis, and release connections on shutdown."""
+    validate_production_settings(settings)
+    install_log_redaction()
     sweeper: asyncio.Task[None] | None = None
     if settings.ingestion_sweep_interval_seconds > 0:
         sweeper = asyncio.create_task(
@@ -56,6 +60,10 @@ app = FastAPI(
     version="0.1.0",
     description="Backend API for repoLens",
     lifespan=lifespan,
+    # The interactive docs load third-party scripts and list every route; keep them for development only.
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
 )
 
 app.include_router(auth_router)
@@ -66,25 +74,21 @@ app.include_router(search_router)
 app.include_router(conversations_router)
 app.include_router(architecture_router)
 
+app.add_middleware(SecurityHeadersMiddleware, settings=settings)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "X-CSRF-Token"],
+    expose_headers=["Retry-After", SCOPE_HEADER],
 )
-
 
 
 @app.get("/", tags=["system"])
 async def root() -> dict[str, str]:
     """Return basic API information."""
     return {"name": "repoLens API", "version": "0.1.0", "docs": "/docs"}
-
-
-@app.get ("/hello" , tags =["system"])
-async def hello () -> dict [str, str]:
-    return {"message" : "hello, world!"}
 
 
 @app.get("/health", tags=["system"])

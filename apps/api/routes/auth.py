@@ -18,9 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.config import Settings
 from apps.api.core.auth import Principal, get_principal, github_account_of, require_csrf, settings_dep
 from apps.api.core.database import get_db
+from apps.api.core.limits import client_ip, get_limiter
 from apps.api.core.redis import get_redis
 from apps.api.models.entities import GitHubAccount, User
 from apps.api.services import github_oauth as oauth
+from apps.api.services.rate_limit import Limiter
 from apps.api.services.sessions import create_session, purge_dead_sessions, revoke_all_sessions, revoke_session
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,15 @@ def _auth_error(settings: Settings, code: str) -> RedirectResponse:
     return response
 
 
+async def _login_limit_error(limiter: Limiter, request: Request, settings: Settings) -> str | None:
+    """Per-IP cap on sign-in traffic: an error code for the web app, or None. Sign-in needs Redis for its state anyway."""
+    try:
+        result = await limiter.reserve(f"login:{client_ip(request, settings)}", settings.auth_login_per_minute, 60)
+    except (RedisError, OSError):
+        return "unavailable"
+    return None if result.allowed else "rate_limited"
+
+
 class UserOut(BaseModel):
     id: int
     login: str
@@ -71,10 +82,13 @@ async def github_login(
     settings: Settings = Depends(settings_dep),
     redis: Redis = Depends(get_redis),
     client: oauth.GitHubOAuthClient = Depends(oauth.get_oauth_client),
+    limiter: Limiter = Depends(get_limiter),
 ) -> RedirectResponse:
     """Start sign-in: store state + PKCE verifier server-side, bind the state to this browser, redirect to GitHub."""
     if not settings.github_login_enabled:
         raise HTTPException(status_code=503, detail="GitHub sign-in is not configured on this server")
+    if limited := await _login_limit_error(limiter, request, settings):
+        return _auth_error(settings, limited)
     state, verifier = oauth.new_state(), oauth.new_verifier()
     try:
         await redis.set(_STATE_KEY + state, json.dumps({"verifier": verifier, "next": safe_next(next)}), ex=settings.oauth_state_ttl_seconds)
@@ -125,7 +139,10 @@ async def github_callback(
     settings: Settings = Depends(settings_dep),
     redis: Redis = Depends(get_redis),
     client: oauth.GitHubOAuthClient = Depends(oauth.get_oauth_client),
+    limiter: Limiter = Depends(get_limiter),
 ) -> Response:
+    if limited := await _login_limit_error(limiter, request, settings):
+        return _auth_error(settings, limited)
     cookie_state = request.cookies.get(settings.oauth_state_cookie_name)
     if not state or not cookie_state or len(state) > 128 or state != cookie_state:
         return _auth_error(settings, "invalid_state")

@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from apps.api.schemas.common import NulFreeStr
+
 
 class RepositoryResponse(BaseModel):
     id: int
@@ -25,4 +27,4 @@ class RepositoryResponse(BaseModel):
 
 
 class RepositoryCreate(BaseModel):
-    github_url: str = Field(min_length=1)
+    github_url: NulFreeStr = Field(min_length=1, max_length=2048)

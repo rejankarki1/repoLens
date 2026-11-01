@@ -18,6 +18,8 @@ const AUTH_ERRORS: Record<string, string> = {
   invalid_state: 'The sign-in could not be verified (it may have expired). Please try again.',
   github_unavailable: 'GitHub could not be reached to confirm your identity. Please try again in a moment.',
   oauth_failed: 'GitHub sign-in did not complete. Please try again.',
+  rate_limited: 'Too many sign-in attempts from this network. Wait a minute and try again.',
+  unavailable: 'Sign-in is temporarily unavailable. Please try again shortly.',
 }
 
 /** The message for `?auth_error=<code>`; unknown codes get a generic one rather than being echoed. */

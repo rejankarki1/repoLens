@@ -1,6 +1,8 @@
 """Repository-scoped conversations with grounded (RAG) answers."""
 
+import asyncio
 import logging
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
@@ -8,7 +10,9 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.config import get_settings
+from apps.api.config import Settings, get_settings
+from apps.api.core.auth import settings_dep
+from apps.api.core.limits import get_limiter
 from apps.api.core.database import get_db, session_factory
 from apps.api.models.entities import Conversation, Message
 from apps.api.schemas.conversation import (
@@ -22,6 +26,8 @@ from apps.api.schemas.conversation import (
     MessageResponse,
 )
 from apps.api.services import rag
+from apps.api.services.quota import AiReservation, reserve_ai_question
+from apps.api.services.rate_limit import Limiter
 from apps.api.services.access import RepoAccess, member_read, member_write
 from apps.api.services.code_search import NotIndexedError, RepositoryNotFoundError
 from apps.api.services.embeddings import GeminiEmbedder, get_embedder
@@ -65,6 +71,17 @@ async def _conversation(db: AsyncSession, access: RepoAccess, conversation_id: i
         return await rag.get_conversation(db, access.repository.id, conversation_id, access.user_id)
     except rag.ConversationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+async def _guarded(stream: AsyncIterator[str], quota: AiReservation) -> AsyncIterator[str]:
+    """Pass the stream through; whatever happens, settle the quota: kept only if the answer was saved (`done`)."""
+    saved = False
+    try:
+        async for chunk in stream:
+            saved = saved or chunk.startswith("event: done\n")
+            yield chunk
+    finally:
+        await asyncio.shield(quota.finish(saved))
 
 
 async def _prepare(db, conversation, question, embedder) -> rag.PreparedQuestion:
@@ -191,22 +208,30 @@ async def send_message(
     db: AsyncSession = Depends(get_db),
     generator: Generator | None = Depends(get_generator),
     embedder: GeminiEmbedder | None = Depends(get_embedder),
+    settings: Settings = Depends(settings_dep),
+    limiter: Limiter = Depends(get_limiter),
 ) -> AnswerResponse:
     """Ask a question and get the whole grounded answer at once (also the easiest path to test)."""
     question = _question(body)
     generator = _require_generator(generator)
     conversation = await _conversation(db, access, conversation_id)
-    prepared = await _prepare(db, conversation, question, embedder)  # 404/409 surface before any model call
+    quota = await reserve_ai_question(limiter, settings, access.user_id)  # 429 before any retrieval or model call
+    saved = False
     try:
-        exchange = await rag.answer_question(
-            db, conversation, question, generator=generator, embedder=embedder, prepared=prepared
-        )
-    except GenerationError as exc:
-        logger.warning("Answer generation failed (%s): %s", exc.code, exc.message)
-        raise _generation_http_error(exc) from exc
-    except IntegrityError as exc:  # the conversation was deleted while the answer was being written
-        await db.rollback()
-        raise HTTPException(status_code=404, detail="This conversation was deleted before the answer could be saved") from exc
+        prepared = await _prepare(db, conversation, question, embedder)  # 404/409 surface before any model call
+        try:
+            exchange = await rag.answer_question(
+                db, conversation, question, generator=generator, embedder=embedder, prepared=prepared
+            )
+        except GenerationError as exc:
+            logger.warning("Answer generation failed (%s): %s", exc.code, exc.message)
+            raise _generation_http_error(exc) from exc
+        except IntegrityError as exc:  # the conversation was deleted while the answer was being written
+            await db.rollback()
+            raise HTTPException(status_code=404, detail="This conversation was deleted before the answer could be saved") from exc
+        saved = True
+    finally:
+        await asyncio.shield(quota.finish(saved))
     return AnswerResponse(**rag.exchange_payload(exchange))
 
 
@@ -219,14 +244,21 @@ async def stream_message(
     generator: Generator | None = Depends(get_generator),
     embedder: GeminiEmbedder | None = Depends(get_embedder),
     sessions=Depends(get_sessions),
+    settings: Settings = Depends(settings_dep),
+    limiter: Limiter = Depends(get_limiter),
 ) -> StreamingResponse:
     """Server-sent events: `retrieval` (sources), `token`s, then `done` (saved messages and citations) or `error`."""
     question = _question(body)
     generator = _require_generator(generator)
     conversation = await _conversation(db, access, conversation_id)
-    prepared = await _prepare(db, conversation, question, embedder)
+    quota = await reserve_ai_question(limiter, settings, access.user_id)  # 429 before any retrieval or model call
+    try:
+        prepared = await _prepare(db, conversation, question, embedder)
+    except BaseException:
+        await asyncio.shield(quota.finish(False))
+        raise
     return StreamingResponse(
-        rag.stream_events(prepared, generator=generator, sessions=sessions),
+        _guarded(rag.stream_events(prepared, generator=generator, sessions=sessions), quota),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

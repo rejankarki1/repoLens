@@ -9,10 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from rq import Queue
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.config import get_settings
+from apps.api.config import Settings, get_settings
+from apps.api.core.auth import settings_dep
 from apps.api.core.database import get_db
+from apps.api.core.limits import get_limiter
 from apps.api.core.queue import EMBEDDING_JOB_FUNC, enqueue_embedding, get_queue, live_repository_ids
 from apps.api.services.access import RepoAccess, member_read, member_write
+from apps.api.services.quota import refund_hourly, reserve_hourly
+from apps.api.services.rate_limit import Limiter
 from apps.api.schemas.search import IndexStatusResponse, SearchHitResponse, SearchResponse
 from apps.api.services.code_search import (
     NotIndexedError,
@@ -30,7 +34,7 @@ router = APIRouter(tags=["search"])
 @router.get("/repositories/{repository_id}/search", response_model=SearchResponse, status_code=200)
 async def search_code(
     repository_id: int,
-    q: str = Query(min_length=1, max_length=500, description="A symbol, identifier, file name or question"),
+    q: str = Query(min_length=1, max_length=500, pattern=r"^[^\x00]*$", description="A symbol, identifier, file name or question"),
     limit: int = Query(10, ge=1, le=50),
     mode: Literal["hybrid", "keyword", "semantic"] = Query("hybrid"),
     db: AsyncSession = Depends(get_db),
@@ -82,6 +86,8 @@ async def build_search_index(
     queue: Queue = Depends(get_queue),
     embedder: GeminiEmbedder | None = Depends(get_embedder),
     access: RepoAccess = Depends(member_write),
+    settings: Settings = Depends(settings_dep),
+    limiter: Limiter = Depends(get_limiter),
 ) -> IndexStatusResponse:
     """Queue the background job that embeds this repository's missing chunks (safe to repeat)."""
     try:
@@ -100,9 +106,15 @@ async def build_search_index(
         pending = set()
     if repository_id in pending:
         raise HTTPException(status_code=409, detail="An embedding job is already queued or waiting to retry")
+    # Embedding calls are billed by the provider: count the job against the user's hourly allowance.
+    await reserve_hourly(
+        limiter, "embeddings", access.user_id, settings.embedding_build_hourly_limit,
+        f"You have started {settings.embedding_build_hourly_limit} indexing jobs in the last hour.",
+    )
     try:
         await asyncio.to_thread(enqueue_embedding, queue, repository_id, get_settings())
     except Exception as exc:
         logger.exception("Could not enqueue embeddings for repository %s", repository_id)
+        await refund_hourly(limiter, "embeddings", access.user_id)
         raise HTTPException(status_code=503, detail="Could not queue the embedding job; please try again") from exc
     return IndexStatusResponse(**asdict(status))

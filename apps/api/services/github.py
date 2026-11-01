@@ -13,7 +13,14 @@ import httpx
 from apps.api.config import Settings, get_settings
 
 _GITHUB_HOSTS = {"github.com", "www.github.com"}
-_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+# GitHub's own rules: an owner is letters, digits and hyphens (at most 39); a repository is letters, digits, `.`, `_`
+# and `-` (at most 100) and is never `.` or `..`. Anything else is refused before a request is built from it.
+_OWNER_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
+_REPO_PATTERN = re.compile(r"^(?!\.{1,2}$)[A-Za-z0-9._-]{1,100}$")
+
+
+def is_valid_owner_repo(owner: str, repo: str) -> bool:
+    return bool(_OWNER_PATTERN.fullmatch(owner) and _REPO_PATTERN.fullmatch(repo))
 
 
 class GitHubServiceError(Exception):
@@ -64,6 +71,12 @@ def parse_github_url(url: str) -> tuple[str, str]:
 
     if parsed.hostname not in _GITHUB_HOSTS:
         raise InvalidRepositoryURLError(f"URL must be a github.com repository URL: {url!r}")
+    try:
+        port = parsed.port
+    except ValueError:
+        port = -1
+    if parsed.username is not None or parsed.password is not None or port is not None:
+        raise InvalidRepositoryURLError(f"URL must not contain credentials or a port: {url!r}")
 
     segments = [segment for segment in parsed.path.split("/") if segment]
     if len(segments) != 2:
@@ -72,7 +85,7 @@ def parse_github_url(url: str) -> tuple[str, str]:
     owner, repo = segments
     repo = repo.removesuffix(".git")
 
-    if not _NAME_PATTERN.fullmatch(owner) or not _NAME_PATTERN.fullmatch(repo):
+    if not is_valid_owner_repo(owner, repo):
         raise InvalidRepositoryURLError(f"Owner/repository contain invalid characters: {url!r}")
 
     return owner, repo

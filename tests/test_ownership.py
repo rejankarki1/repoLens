@@ -24,7 +24,7 @@ SHOWCASE = "octo/showcase"
 
 
 @pytest.fixture(autouse=True)
-def isolated(no_auto_membership):
+def isolated(no_auto_membership, app_overrides):
     """Every repository in these tests belongs to nobody until the test says so."""
     app.dependency_overrides[settings_dep] = lambda: make_settings(guest_showcase_repositories=SHOWCASE)
     app.dependency_overrides[get_queue] = lambda: MagicMock()

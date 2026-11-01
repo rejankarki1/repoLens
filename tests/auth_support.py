@@ -19,6 +19,18 @@ def make_settings(**overrides) -> Settings:
         web_origins=WEB,
         gemini_api_key=None,
         groq_api_key=None,
+        # Generous by default so ordinary tests never meet a limit; limit tests pass low values explicitly.
+        ai_burst_limit=10_000,
+        ai_daily_limit_per_user=100_000,
+        ai_global_daily_limit=1_000_000,
+        ai_global_concurrency=1_000,
+        import_hourly_limit=10_000,
+        import_max_concurrent_per_user=1_000,
+        max_repositories_per_user=10_000,
+        embedding_build_hourly_limit=10_000,
+        architecture_hourly_limit=10_000,
+        guest_reads_per_minute=1_000_000,
+        auth_login_per_minute=1_000_000,
     )
     values.update(overrides)
     return Settings(_env_file=None, **values)  # never read the developer's .env

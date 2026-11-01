@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.core.database import get_db
+from apps.api.core.limits import guest_read_limit
 from apps.api.services.access import RepoAccess, read_access
 from apps.api.models.entities import Repository, SourceFile
 from apps.api.schemas.file import FileContent, FileSummary
@@ -30,7 +31,8 @@ async def _current_commit_sha(db: AsyncSession, repository_id: int) -> str | Non
 
 @router.get("/repositories/{repository_id}/files", response_model=list[FileSummary], status_code=200)
 async def list_files(
-    repository_id: int, db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(read_access)
+    repository_id: int, db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(read_access),
+    _guest_limit: None = Depends(guest_read_limit),
 ) -> list[FileSummary]:
     """List the current snapshot's files (metadata only), sorted by path."""
     commit_sha = await _current_commit_sha(db, repository_id)
@@ -53,9 +55,10 @@ async def list_files(
 @router.get("/repositories/{repository_id}/files/content", response_model=FileContent, status_code=200)
 async def get_file_content(
     repository_id: int,
-    path: str = Query(min_length=1, max_length=4096, description="Repository-relative file path, e.g. src/app.py"),
+    path: str = Query(min_length=1, max_length=4096, pattern=r"^[^\x00]*$", description="Repository-relative file path, e.g. src/app.py"),
     db: AsyncSession = Depends(get_db),
     access: RepoAccess = Depends(read_access),
+    _guest_limit: None = Depends(guest_read_limit),
 ) -> FileContent:
     """Return one file's stored source text from the current snapshot."""
     commit_sha = await _current_commit_sha(db, repository_id)

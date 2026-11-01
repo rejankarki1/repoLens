@@ -5,13 +5,15 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from apps.api.schemas.common import NulFreeStr
+
 
 class ConversationCreate(BaseModel):
-    title: str | None = Field(default=None, max_length=255)
+    title: NulFreeStr | None = Field(default=None, max_length=255)
 
 
 class MessageCreate(BaseModel):
-    content: str = Field(min_length=1, max_length=20_000)  # the effective limit is `rag_question_max_chars`
+    content: NulFreeStr = Field(min_length=1, max_length=20_000)  # the effective limit is `rag_question_max_chars`
 
 
 class CitationResponse(BaseModel):
@@ -39,7 +41,7 @@ class MessageResponse(BaseModel):
 
 
 class ConversationRename(BaseModel):
-    title: str = Field(min_length=1, max_length=255)
+    title: NulFreeStr = Field(min_length=1, max_length=255)
 
 
 class ConversationResponse(BaseModel):

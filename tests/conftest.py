@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
@@ -14,7 +15,12 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from apps.api.config import get_settings
+from apps.api.core.auth import settings_dep
 from apps.api.core.database import get_db
+from apps.api.core.limits import get_limiter
+from apps.api.routes.conversations import get_sessions
+from apps.api.services.rate_limit import MemoryLimiter
+from tests.auth_support import make_settings
 from apps.api.main import app
 from apps.api.models.base import Base
 from apps.api.models.entities import GitHubAccount, Repository, User, UserRepository
@@ -62,11 +68,13 @@ def client(db_session: AsyncMock, github_service: AsyncMock) -> Iterator[TestCli
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_github_service] = override_get_github_service
+    app.dependency_overrides[get_limiter] = lambda: MemoryLimiter()
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_github_service, None)
+        app.dependency_overrides.pop(get_limiter, None)
 
 
 def _test_database_url() -> URL:
@@ -129,6 +137,19 @@ def _prepared_test_database() -> Iterator[None]:
     asyncio.run(_drop_test_database())
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _never_touch_the_development_database(_prepared_test_database: None) -> Iterator[None]:
+    """Safety net: the app's own session factory points at the development database named by DATABASE_URL. Code that
+    reaches for it directly (for example a streamed answer being saved) must hit the disposable test database instead,
+    so no test, however it is written, can add or change development data."""
+    from apps.api.core import database
+
+    test_engine = create_async_engine(_test_database_url())
+    database.session_factory.configure(bind=test_engine)
+    yield
+    asyncio.run(test_engine.dispose())
+
+
 @pytest.fixture
 async def real_db_session(_prepared_test_database: None) -> AsyncIterator[AsyncSession]:
     """A real `AsyncSession` against `repolens_test`, wrapped in a transaction that is always
@@ -180,7 +201,13 @@ def no_auto_membership() -> Iterator[None]:
 
 
 @pytest.fixture
-async def app_overrides(real_db_session: AsyncSession, github_service: AsyncMock) -> AsyncIterator[None]:
+def limiter() -> MemoryLimiter:
+    """The in-memory limiter the app uses in tests (same semantics as the Redis one, tested separately)."""
+    return MemoryLimiter()
+
+
+@pytest.fixture
+async def app_overrides(real_db_session: AsyncSession, github_service: AsyncMock, limiter: MemoryLimiter) -> AsyncIterator[None]:
     """Route the app to the transactional test database and a fake GitHub service."""
 
     async def override_get_db() -> AsyncIterator[AsyncSession]:
@@ -191,11 +218,22 @@ async def app_overrides(real_db_session: AsyncSession, github_service: AsyncMock
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_github_service] = override_get_github_service
+    app.dependency_overrides[get_limiter] = lambda: limiter  # no Redis server needed
+
+    @asynccontextmanager
+    async def test_sessions():
+        yield real_db_session
+
+    app.dependency_overrides[get_sessions] = lambda: test_sessions  # streamed answers are saved in the test transaction
+    app.dependency_overrides[settings_dep] = lambda: make_settings()  # fixed settings: the developer's .env never leaks in
     try:
         yield
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_github_service, None)
+        app.dependency_overrides.pop(get_limiter, None)
+        app.dependency_overrides.pop(get_sessions, None)
+        app.dependency_overrides.pop(settings_dep, None)
 
 
 def _new_http_client() -> httpx.AsyncClient:

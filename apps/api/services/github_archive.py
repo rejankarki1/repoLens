@@ -27,7 +27,7 @@ from apps.api.services.github import (
     RepositoryNotFoundError,
     _build_headers,
 )
-from apps.api.services.github import _NAME_PATTERN as _OWNER_REPO_PATTERN
+from apps.api.services.github import is_valid_owner_repo
 
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
@@ -103,7 +103,7 @@ class GitHubArchiveService:
 
     async def fetch_repository_archive(self, owner: str, repo: str) -> ArchiveDownloadResult:
         """Resolve `owner/repo`'s default branch to a commit and download its ZIP archive."""
-        if not _OWNER_REPO_PATTERN.fullmatch(owner) or not _OWNER_REPO_PATTERN.fullmatch(repo):
+        if not is_valid_owner_repo(owner, repo):
             raise InvalidRepositoryURLError(f"Invalid repository owner/name: {owner!r}/{repo!r}")
 
         metadata = await self._github_service.get_repository_metadata(f"https://github.com/{owner}/{repo}")

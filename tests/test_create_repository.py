@@ -9,9 +9,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError, OperationalError
 
-from apps.api.core.auth import Principal, require_csrf
+from apps.api.core.auth import Principal, require_csrf, settings_dep
 from apps.api.main import app
 from apps.api.models.entities import Repository
+from tests.auth_support import make_settings
 from apps.api.services.github import (
     GitHubRateLimitedError,
     GitHubRepositoryMetadata,
@@ -30,11 +31,14 @@ REACT_METADATA = GitHubRepositoryMetadata(
 
 
 @pytest.fixture(autouse=True)
-def signed_in():
-    """These tests are about GitHub and database failures, so the caller is simply a signed-in user."""
+def signed_in(monkeypatch):
+    """These tests are about GitHub and database failures: the caller is simply a signed-in user with room in the cap."""
     app.dependency_overrides[require_csrf] = lambda: Principal(user=SimpleNamespace(id=1), session=SimpleNamespace(id=1))
+    app.dependency_overrides[settings_dep] = lambda: make_settings()
+    monkeypatch.setattr("apps.api.routes.repositories.check_repository_cap", AsyncMock())
     yield
     app.dependency_overrides.pop(require_csrf, None)
+    app.dependency_overrides.pop(settings_dep, None)
 
 
 def _existing_repository() -> Repository:
@@ -97,9 +101,11 @@ def test_create_repository_returns_201_on_success(
 def test_create_repository_maps_github_errors_to_http_status(
     client: TestClient,
     github_service: AsyncMock,
+    db_session: AsyncMock,
     exception: Exception,
     expected_status: int,
 ) -> None:
+    db_session.execute.return_value.scalar_one_or_none.return_value = None  # not stored yet: GitHub is asked
     github_service.get_repository_metadata.side_effect = exception
 
     response = client.post("/repositories", json={"github_url": "https://github.com/facebook/react"})

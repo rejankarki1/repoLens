@@ -116,6 +116,23 @@ class Settings(BaseSettings):
     session_cookie_secure: bool | None = None  # None: secure exactly when ENVIRONMENT=production
     session_touch_seconds: int = 300  # last_seen_at is refreshed at most this often
 
+    # --- Usage protection (see docs/auth-design.md). Every limit is enforced server-side, atomically, in Redis.
+    ai_daily_limit_per_user: int = 20  # questions per user per 24 h window (a window starts at the first counted question)
+    ai_burst_limit: int = 5  # questions per user per burst window; counts attempts, failed ones included
+    ai_burst_window_seconds: int = 60
+    ai_global_daily_limit: int = 500  # questions across all users per 24 h: the provider budget guard
+    ai_global_concurrency: int = 8  # answers being generated at the same moment, across all users
+    ai_lease_seconds: int = 180  # a generation slot is freed by itself after this, even if the API process dies
+    import_hourly_limit: int = 10  # new imports or re-ingestions per user per hour
+    import_max_concurrent_per_user: int = 3  # queued or running ingestions among a user's repositories
+    max_repositories_per_user: int = 50
+    embedding_build_hourly_limit: int = 6  # paid embedding jobs a user may start per hour
+    architecture_hourly_limit: int = 30
+    guest_reads_per_minute: int = 120  # per client IP, for signed-out requests to the showcase
+    auth_login_per_minute: int = 20  # per client IP, for starting or finishing GitHub sign-in
+    # Reverse proxies (comma separated IPs or CIDRs) whose X-Forwarded-For header is believed. Empty: never believed.
+    trusted_proxies: str = ""
+
     # Repositories (owner/name, comma separated) that signed-out visitors may browse read-only. Nothing is public unless listed.
     guest_showcase_repositories: str = ""
 
@@ -141,6 +158,12 @@ class Settings(BaseSettings):
     @property
     def github_oauth_redirect_uri(self) -> str:
         return f"{self.api_public_url.rstrip('/')}/auth/github/callback"
+
+    @property
+    def trusted_proxy_networks(self) -> list:
+        import ipaddress
+
+        return [ipaddress.ip_network(item.strip(), strict=False) for item in self.trusted_proxies.split(",") if item.strip()]
 
     @property
     def oauth_api_base_url(self) -> str:
