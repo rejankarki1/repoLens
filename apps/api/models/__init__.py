@@ -10,6 +10,7 @@ from apps.api.models.entities import (
     Repository,
     SourceFile,
     User,
+    UserRepository,
 )
 
-__all__ = ["ArchitectureAnalysis", "AuthSession", "Base", "User", "GitHubAccount", "Repository", "Conversation", "Message", "SourceFile", "CodeChunk", "CodeEmbedding"]
+__all__ = ["ArchitectureAnalysis", "AuthSession", "Base", "User", "GitHubAccount", "Repository", "Conversation", "Message", "SourceFile", "CodeChunk", "CodeEmbedding", "UserRepository"]

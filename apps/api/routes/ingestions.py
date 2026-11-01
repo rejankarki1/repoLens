@@ -13,6 +13,7 @@ from apps.api.core.queue import enqueue_ingestion, get_queue
 from apps.api.jobs.maintenance import sweep_stale_ingestions
 from apps.api.models.entities import Repository
 from apps.api.schemas.ingestion import IngestionStatusResponse
+from apps.api.services.access import RepoAccess, member_write, read_access
 from apps.api.services.ingestion import IngestionInProgressError, abort_enqueue, request_ingestion
 from apps.api.services.source_file_persistence import UnknownRepositoryError
 
@@ -50,6 +51,7 @@ async def create_ingestion(
     repository_id: int,
     db: AsyncSession = Depends(get_db),
     queue: Queue = Depends(get_queue),
+    access: RepoAccess = Depends(member_write),
 ) -> IngestionStatusResponse:
     """Queue a background ingestion. Returns 202 once the job is in Redis; poll `ingestion-status`."""
     try:
@@ -82,6 +84,8 @@ async def create_ingestion(
     response_model=IngestionStatusResponse,
     status_code=200,
 )
-async def get_ingestion_status(repository_id: int, db: AsyncSession = Depends(get_db)) -> IngestionStatusResponse:
+async def get_ingestion_status(
+    repository_id: int, db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(read_access)
+) -> IngestionStatusResponse:
     """Current ingestion state and the commit of the stored snapshot."""
     return _status_response(await _get_repository_or_404(db, repository_id))

@@ -46,9 +46,11 @@ The first question names the conversation, with no model call: greetings and "pl
 
 Each validated `[S#]` in an answer links to the cited lines. A plain click opens a read-only preview of that file with the cited lines highlighted, beside the conversation on wide screens (1280 px and up) and in a drawer on narrower ones; Ctrl/Cmd/Shift/middle-click and "Open in Code Explorer" navigate to `?tab=code&file=...&lines=a-b` as before. The preview shows the repository's current snapshot of the file and says so when the answer came from another commit or the cited lines are past the end of the file. Markers that do not match a retrieved source, including the unknown labels inside a parenthesised group such as `(S1, S9)`, are never linked. The open conversation is kept in the URL (`?tab=ask&c=<id>`), so reloads and Back/Forward return to it.
 
-## Ownership (Phase 8)
+## Ownership
 
-Every conversation endpoint is scoped to one user: the local default user (`DEFAULT_USER_EMAIL`, looked up by `rag.find_default_user_id`). A conversation of another user, or of another repository, answers 404 as if it did not exist. When authentication arrives, replace `find_default_user_id` with the authenticated user's id; no route or query needs to change, and clearing history already deletes only that user's rows. Repository access itself (who may see which repository) is not modelled yet and is part of the same phase.
+Every conversation endpoint requires a signed-in user who is a member of the repository (it is in their workspace), and every conversation query filters by that user's id from the session. A conversation of another user, or of another repository, answers 404 as if it did not exist, for reading, renaming, deleting, asking and streaming alike. A showcase repository the user has not added answers 403 ("add it to your repositories"); a visitor gets 401. Mutating requests must also carry the CSRF token. See `docs/auth-design.md`.
+
+Conversations written before authentication belonged to the local development user; `docs/auth-migration.md` explains how to claim them.
 
 ## Choosing the answer provider
 
@@ -73,4 +75,4 @@ Restart the API after changing `.env`. Default Groq model: `llama-3.3-70b-versat
 
 ## Database
 
-One migration, `7a3d9e5b2c41_add_message_citations`, adds `messages.citations` (JSONB, NOT NULL, default `[]`). Apply it with `alembic upgrade head` before using the endpoints. Until authentication exists, conversations belong to a local user (`local@repolens.local`) created on first use. The conversation management endpoints need no further migration.
+One migration, `7a3d9e5b2c41_add_message_citations`, adds `messages.citations` (JSONB, NOT NULL, default `[]`). Apply it with `alembic upgrade head` before using the endpoints. Conversations belong to the signed-in user (`docs/auth-design.md`). The conversation management endpoints need no further migration.

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import get_settings
 from apps.api.core.database import get_db, session_factory
-from apps.api.models.entities import Conversation, Message, Repository
+from apps.api.models.entities import Conversation, Message
 from apps.api.schemas.conversation import (
     AnswerResponse,
     ClearedResponse,
@@ -22,6 +22,7 @@ from apps.api.schemas.conversation import (
     MessageResponse,
 )
 from apps.api.services import rag
+from apps.api.services.access import RepoAccess, member_read, member_write
 from apps.api.services.code_search import NotIndexedError, RepositoryNotFoundError
 from apps.api.services.embeddings import GeminiEmbedder, get_embedder
 from apps.api.services.generation import GenerationError, Generator, get_generator
@@ -58,25 +59,12 @@ def _question(body: MessageCreate) -> str:
     return question
 
 
-async def _conversation(db: AsyncSession, repository_id: int, conversation_id: int) -> Conversation:
-    """The conversation, if it is this repository's and belongs to the current user.
-
-    Ownership today: every conversation belongs to the one local user (`rag.DEFAULT_USER_EMAIL`), and every route
-    below filters by that user as well as by repository. Phase 8 (authentication) replaces `find_default_user_id`
-    with the signed-in user's id; nothing else in these routes has to change. See docs/rag.md, "Ownership".
-    """
-    user_id = await rag.find_default_user_id(db)
-    if user_id is None:  # nobody has created a conversation yet
-        raise HTTPException(status_code=404, detail=f"Conversation {conversation_id} not found in repository {repository_id}")
+async def _conversation(db: AsyncSession, access: RepoAccess, conversation_id: int) -> Conversation:
+    """The conversation, if it belongs to this repository and to the signed-in user (404 for anyone else's)."""
     try:
-        return await rag.get_conversation(db, repository_id, conversation_id, user_id)
+        return await rag.get_conversation(db, access.repository.id, conversation_id, access.user_id)
     except rag.ConversationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-async def _require_repository(db: AsyncSession, repository_id: int) -> None:
-    if await db.get(Repository, repository_id) is None:
-        raise HTTPException(status_code=404, detail=f"Repository {repository_id} not found")
 
 
 async def _prepare(db, conversation, question, embedder) -> rag.PreparedQuestion:
@@ -90,28 +78,26 @@ async def _prepare(db, conversation, question, embedder) -> rag.PreparedQuestion
 
 @router.post("/repositories/{repository_id}/conversations", response_model=ConversationResponse, status_code=201)
 async def create_conversation(
-    repository_id: int, body: ConversationCreate | None = None, db: AsyncSession = Depends(get_db)
+    body: ConversationCreate | None = None, db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(member_write)
 ) -> Conversation:
-    await _require_repository(db, repository_id)
     title = body.title.strip() if body and body.title else None
-    conversation = Conversation(user_id=await rag.default_user_id(db), repository_id=repository_id, title=title or None)
+    conversation = Conversation(user_id=access.user_id, repository_id=access.repository.id, title=title or None)
     db.add(conversation)
     await db.commit()
     return conversation
 
 
 @router.get("/repositories/{repository_id}/conversations", response_model=list[ConversationResponse])
-async def list_conversations(repository_id: int, db: AsyncSession = Depends(get_db)) -> list[ConversationResponse]:
+async def list_conversations(
+    db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(member_read)
+) -> list[ConversationResponse]:
     """The current user's conversations about this repository, most recently active first.
 
     Conversations without any message are left out: one is created when the first question is sent, and it stays
     empty if that question fails, which would otherwise pile up as identical "Untitled chat" rows. A conversation
     saved without a title (older data) is titled from its first question here, without being modified.
     """
-    await _require_repository(db, repository_id)
-    user_id = await rag.find_default_user_id(db)
-    if user_id is None:
-        return []
+    repository_id, user_id = access.repository.id, access.user_id
     stats = (
         select(
             Message.conversation_id,
@@ -145,22 +131,22 @@ async def list_conversations(repository_id: int, db: AsyncSession = Depends(get_
 
 
 @router.delete("/repositories/{repository_id}/conversations", response_model=ClearedResponse)
-async def clear_conversations(repository_id: int, db: AsyncSession = Depends(get_db)) -> ClearedResponse:
+async def clear_conversations(
+    db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(member_write)
+) -> ClearedResponse:
     """Delete the current user's whole chat history for this repository (its messages go with it)."""
-    await _require_repository(db, repository_id)
-    user_id = await rag.find_default_user_id(db)
-    if user_id is None:
-        return ClearedResponse(deleted=0)
     result = await db.execute(
-        delete(Conversation).where(Conversation.repository_id == repository_id, Conversation.user_id == user_id)
+        delete(Conversation).where(Conversation.repository_id == access.repository.id, Conversation.user_id == access.user_id)
     )
     await db.commit()
     return ClearedResponse(deleted=result.rowcount or 0)
 
 
 @router.get("/repositories/{repository_id}/conversations/{conversation_id}", response_model=ConversationDetailResponse)
-async def get_conversation(repository_id: int, conversation_id: int, db: AsyncSession = Depends(get_db)):
-    conversation = await _conversation(db, repository_id, conversation_id)
+async def get_conversation(
+    conversation_id: int, db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(member_read)
+):
+    conversation = await _conversation(db, access, conversation_id)
     messages = list(
         (await db.execute(select(Message).where(Message.conversation_id == conversation.id).order_by(Message.id))).scalars()
     )
@@ -174,20 +160,22 @@ async def get_conversation(repository_id: int, conversation_id: int, db: AsyncSe
 
 @router.patch("/repositories/{repository_id}/conversations/{conversation_id}", response_model=ConversationResponse)
 async def rename_conversation(
-    repository_id: int, conversation_id: int, body: ConversationRename, db: AsyncSession = Depends(get_db)
+    conversation_id: int, body: ConversationRename, db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(member_write)
 ) -> Conversation:
     title = " ".join(body.title.split())
     if not title:
         raise HTTPException(status_code=422, detail="The title must not be empty")
-    conversation = await _conversation(db, repository_id, conversation_id)
+    conversation = await _conversation(db, access, conversation_id)
     conversation.title = title
     await db.commit()
     return conversation
 
 
 @router.delete("/repositories/{repository_id}/conversations/{conversation_id}", status_code=204)
-async def delete_conversation(repository_id: int, conversation_id: int, db: AsyncSession = Depends(get_db)) -> Response:
-    conversation = await _conversation(db, repository_id, conversation_id)
+async def delete_conversation(
+    conversation_id: int, db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(member_write)
+) -> Response:
+    conversation = await _conversation(db, access, conversation_id)
     await db.execute(delete(Conversation).where(Conversation.id == conversation.id))  # messages cascade in the database
     await db.commit()
     return Response(status_code=204)
@@ -197,9 +185,9 @@ async def delete_conversation(repository_id: int, conversation_id: int, db: Asyn
     "/repositories/{repository_id}/conversations/{conversation_id}/messages", response_model=AnswerResponse, status_code=201
 )
 async def send_message(
-    repository_id: int,
     conversation_id: int,
     body: MessageCreate,
+    access: RepoAccess = Depends(member_write),
     db: AsyncSession = Depends(get_db),
     generator: Generator | None = Depends(get_generator),
     embedder: GeminiEmbedder | None = Depends(get_embedder),
@@ -207,7 +195,7 @@ async def send_message(
     """Ask a question and get the whole grounded answer at once (also the easiest path to test)."""
     question = _question(body)
     generator = _require_generator(generator)
-    conversation = await _conversation(db, repository_id, conversation_id)
+    conversation = await _conversation(db, access, conversation_id)
     prepared = await _prepare(db, conversation, question, embedder)  # 404/409 surface before any model call
     try:
         exchange = await rag.answer_question(
@@ -224,9 +212,9 @@ async def send_message(
 
 @router.post("/repositories/{repository_id}/conversations/{conversation_id}/messages/stream")
 async def stream_message(
-    repository_id: int,
     conversation_id: int,
     body: MessageCreate,
+    access: RepoAccess = Depends(member_write),
     db: AsyncSession = Depends(get_db),
     generator: Generator | None = Depends(get_generator),
     embedder: GeminiEmbedder | None = Depends(get_embedder),
@@ -235,7 +223,7 @@ async def stream_message(
     """Server-sent events: `retrieval` (sources), `token`s, then `done` (saved messages and citations) or `error`."""
     question = _question(body)
     generator = _require_generator(generator)
-    conversation = await _conversation(db, repository_id, conversation_id)
+    conversation = await _conversation(db, access, conversation_id)
     prepared = await _prepare(db, conversation, question, embedder)
     return StreamingResponse(
         rag.stream_events(prepared, generator=generator, sessions=sessions),

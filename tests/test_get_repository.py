@@ -1,53 +1,33 @@
-"""Tests for GET /repositories/{id}."""
+"""Tests for GET /repositories/{id} (access rules in depth: test_ownership.py)."""
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock
+import httpx
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi.testclient import TestClient
+from tests.search_support import new_repository
 
-from apps.api.models.entities import Repository
-
-
-def _make_repository() -> Repository:
-    return Repository(
-        id=1,
-        github_repo_id=123456,
-        github_account_id=None,
-        full_name="octocat/hello-world",
-        default_branch="main",
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        ingestion_status="completed",
-        last_ingested_commit_sha="a" * 40,
-        ingestion_truncated=False,
-        last_ingested_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
-        ingestion_error=None,
-    )
+pytestmark = pytest.mark.anyio
 
 
-def test_get_repository_returns_200_when_found(client: TestClient, db_session: AsyncMock) -> None:
-    db_session.execute.return_value.scalar_one_or_none.return_value = _make_repository()
+async def test_get_repository_returns_200_for_a_member(real_client: httpx.AsyncClient, real_db_session: AsyncSession) -> None:
+    repo_id = await new_repository(real_db_session, "octocat/hello-world")
 
-    response = client.get("/repositories/1")
+    response = await real_client.get(f"/repositories/{repo_id}")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["id"] == 1
+    assert body["id"] == repo_id
     assert body["full_name"] == "octocat/hello-world"
     assert body["ingestion_status"] == "completed"
-    assert body["last_ingested_commit_sha"] == "a" * 40
-    assert body["last_ingested_at"] == "2026-01-02T00:00:00Z"
+    assert body["viewer_access"] == "member"
 
 
-def test_get_repository_returns_404_when_missing(client: TestClient, db_session: AsyncMock) -> None:
-    db_session.execute.return_value.scalar_one_or_none.return_value = None
-
-    response = client.get("/repositories/999")
+async def test_get_repository_returns_404_when_missing(real_client: httpx.AsyncClient) -> None:
+    response = await real_client.get("/repositories/999999")
 
     assert response.status_code == 404
-    assert "999" in response.json()["detail"]
+    assert "999999" in response.json()["detail"]
 
 
-def test_get_repository_returns_422_for_non_integer_id(client: TestClient) -> None:
-    response = client.get("/repositories/not-an-id")
-
-    assert response.status_code == 422
+async def test_get_repository_returns_422_for_non_integer_id(real_client: httpx.AsyncClient) -> None:
+    assert (await real_client.get("/repositories/not-an-id")).status_code == 422

@@ -41,29 +41,15 @@ async def test_create_repository_persists_a_real_row(
     assert row.default_branch == "main"
 
 
-async def test_create_repository_returns_409_on_real_duplicate(
-    real_client: httpx.AsyncClient, github_service: AsyncMock
+async def test_create_repository_twice_reuses_the_row(
+    real_client: httpx.AsyncClient, github_service: AsyncMock, real_db_session: AsyncSession
 ) -> None:
     github_service.get_repository_metadata.return_value = REACT_METADATA
 
     first = await real_client.post("/repositories", json={"github_url": "https://github.com/facebook/react"})
     second = await real_client.post("/repositories", json={"github_url": "https://github.com/facebook/react"})
 
-    assert first.status_code == 201
-    assert second.status_code == 409
-
-
-async def test_imported_repository_is_retrievable_via_get_endpoints(
-    real_client: httpx.AsyncClient, github_service: AsyncMock
-) -> None:
-    github_service.get_repository_metadata.return_value = REACT_METADATA
-
-    created = await real_client.post("/repositories", json={"github_url": "https://github.com/facebook/react"})
-    repository_id = created.json()["id"]
-
-    get_one = await real_client.get(f"/repositories/{repository_id}")
-    get_all = await real_client.get("/repositories")
-
-    assert get_one.status_code == 200
-    assert get_one.json()["full_name"] == "facebook/react"
-    assert any(repo["id"] == repository_id for repo in get_all.json())
+    assert (first.status_code, second.status_code) == (201, 200)
+    assert first.json()["id"] == second.json()["id"]
+    rows = await real_db_session.execute(select(Repository).where(Repository.github_repo_id == 10270250))
+    assert len(rows.scalars().all()) == 1

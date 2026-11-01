@@ -115,6 +115,9 @@ class Settings(BaseSettings):
     session_cookie_secure: bool | None = None  # None: secure exactly when ENVIRONMENT=production
     session_touch_seconds: int = 300  # last_seen_at is refreshed at most this often
 
+    # Repositories (owner/name, comma separated) that signed-out visitors may browse read-only. Nothing is public unless listed.
+    guest_showcase_repositories: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property

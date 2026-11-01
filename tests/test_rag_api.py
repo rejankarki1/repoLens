@@ -515,12 +515,14 @@ async def test_conversations_of_another_user_are_invisible_and_untouchable(api: 
     assert (await api["db"].get(Conversation, theirs.id)) is not None
 
 
-async def test_reads_do_not_create_the_local_user(api: dict) -> None:
-    from apps.api.models.entities import User
+async def test_listing_conversations_is_a_read_that_writes_nothing(api: dict) -> None:
+    from apps.api.models.entities import Conversation, User
 
     repo_id = await new_repository(api["db"])
+    users = (await api["db"].execute(select(func.count()).select_from(User))).scalar_one()
     assert (await api["client"].get(f"/repositories/{repo_id}/conversations")).json() == []
-    assert (await api["db"].execute(select(func.count()).select_from(User))).scalar_one() == 0
+    assert (await api["db"].execute(select(func.count()).select_from(User))).scalar_one() == users
+    assert (await api["db"].execute(select(func.count()).select_from(Conversation))).scalar_one() == 0
 
 
 async def test_deleting_a_conversation_during_an_answer_is_a_clean_404(api: dict) -> None:

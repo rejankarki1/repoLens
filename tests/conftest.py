@@ -9,6 +9,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -16,6 +17,8 @@ from apps.api.config import get_settings
 from apps.api.core.database import get_db
 from apps.api.main import app
 from apps.api.models.base import Base
+from apps.api.models.entities import GitHubAccount, Repository, User, UserRepository
+from apps.api.services.sessions import create_session
 from apps.api.services.github import get_github_service
 
 _TEST_DB_NAME = "repolens_test"
@@ -155,17 +158,30 @@ async def real_db_session(_prepared_test_database: None) -> AsyncIterator[AsyncS
     await engine.dispose()
 
 
-@pytest.fixture
-async def anon_client(
-    real_db_session: AsyncSession, github_service: AsyncMock
-) -> AsyncIterator[httpx.AsyncClient]:
-    """An async client backed by the real, transactionally-isolated `repolens_test` database.
+# Tests create repositories directly in the database. While a signed-in test user is active, each new repository
+# is added to that user's workspace, as importing it through the API would do. Isolation tests turn this off.
+_AUTO_MEMBER: dict[str, int | None] = {"user_id": None}
 
-    Uses `httpx.AsyncClient` + `ASGITransport` (not Starlette's sync `TestClient`) so the ASGI app
-    runs in the *same* event loop as this test and `real_db_session` - the sync `TestClient` runs
-    the app in a separate loop internally, which would hand `real_db_session`'s asyncpg connection
-    to a loop other than the one it was created on.
-    """
+
+@event.listens_for(Repository, "after_insert")
+def _auto_membership(mapper, connection, target) -> None:  # noqa: ARG001
+    user_id = _AUTO_MEMBER["user_id"]
+    if user_id is not None:
+        connection.execute(pg_insert(UserRepository).values(user_id=user_id, repository_id=target.id).on_conflict_do_nothing())
+
+
+@pytest.fixture
+def no_auto_membership() -> Iterator[None]:
+    """Repositories created while this is active belong to nobody (for isolation tests)."""
+    previous = _AUTO_MEMBER["user_id"]
+    _AUTO_MEMBER["user_id"] = None
+    yield
+    _AUTO_MEMBER["user_id"] = previous
+
+
+@pytest.fixture
+async def app_overrides(real_db_session: AsyncSession, github_service: AsyncMock) -> AsyncIterator[None]:
+    """Route the app to the transactional test database and a fake GitHub service."""
 
     async def override_get_db() -> AsyncIterator[AsyncSession]:
         yield real_db_session
@@ -176,15 +192,72 @@ async def anon_client(
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_github_service] = override_get_github_service
     try:
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-            yield client
+        yield
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_github_service, None)
 
 
+def _new_http_client() -> httpx.AsyncClient:
+    # Same-origin as the web app in the tests, so browsers-style Origin checks see an allowed origin.
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver")
+
+
+_user_numbers = iter(range(9_000_000, 10_000_000))
+
+
+async def make_user(db: AsyncSession, login: str | None = None) -> tuple[User, str, str]:
+    """A GitHub-backed user with a live session. Returns (user, raw session cookie, csrf token)."""
+    number = next(_user_numbers)
+    user = User(email=None)
+    db.add(user)
+    await db.flush()
+    db.add(GitHubAccount(user_id=user.id, github_user_id=number, login=login or f"user{number}", display_name=f"User {number}"))
+    token, session = await create_session(db, user.id, get_settings())
+    await db.commit()
+    return user, token, session.csrf_token
+
+
 @pytest.fixture
-async def real_client(anon_client: httpx.AsyncClient) -> httpx.AsyncClient:
-    """The client most tests use (a later change makes it a signed-in one)."""
-    return anon_client
+async def anon_client(app_overrides: None) -> AsyncIterator[httpx.AsyncClient]:
+    """A visitor: no session cookie."""
+    async with _new_http_client() as client:
+        yield client
+
+
+@pytest.fixture
+async def make_client(real_db_session: AsyncSession, app_overrides: None):
+    """Factory for signed-in clients of distinct users: `client, user = await make_client("alice")`."""
+    clients: list[httpx.AsyncClient] = []
+
+    async def factory(login: str | None = None) -> tuple[httpx.AsyncClient, User]:
+        user, token, csrf = await make_user(real_db_session, login)
+        client = _new_http_client()
+        client.cookies.set(get_settings().session_cookie_name, token)
+        client.headers["X-CSRF-Token"] = csrf
+        clients.append(client)
+        return client, user
+
+    yield factory
+    for client in clients:
+        await client.aclose()
+
+
+@pytest.fixture
+async def test_user(real_db_session: AsyncSession) -> AsyncIterator[tuple[User, str, str]]:
+    user, token, csrf = await make_user(real_db_session, "tester")
+    _AUTO_MEMBER["user_id"] = user.id
+    try:
+        yield user, token, csrf
+    finally:
+        _AUTO_MEMBER["user_id"] = None
+
+
+@pytest.fixture
+async def real_client(app_overrides: None, test_user: tuple[User, str, str]) -> AsyncIterator[httpx.AsyncClient]:
+    """The client most tests use: signed in as `test_user`, who is automatically a member of repositories the test creates."""
+    _user, token, csrf = test_user
+    async with _new_http_client() as client:
+        client.cookies.set(get_settings().session_cookie_name, token)
+        client.headers["X-CSRF-Token"] = csrf
+        yield client

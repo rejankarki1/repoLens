@@ -35,18 +35,17 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from apps.api.config import Settings, get_settings
-from apps.api.models.entities import Conversation, Message, Repository, User
+from apps.api.models.entities import Conversation, Message, Repository
 from apps.api.services.code_search import SearchHit, search_repository
 from apps.api.services.embeddings import GeminiEmbedder
 from apps.api.services.generation import Finished, GenerationError, Generator, TextDelta
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_USER_EMAIL = "local@repolens.local"  # until authentication exists, every conversation belongs to this user
+DEFAULT_USER_EMAIL = "local@repolens.local"  # the pre-authentication development user; see scripts/claim_local_data.py
 NO_EVIDENCE_ANSWER = (
     "I couldn't find code in this repository that is relevant to that question. "
     "Try naming a file, function or feature."
@@ -130,25 +129,13 @@ class Exchange:
 # --- users and conversations ------------------------------------------------------------------------------
 
 
-async def default_user_id(db: AsyncSession) -> int:
-    """The id of the local user, created on first use (idempotent, safe under concurrency)."""
-    await db.execute(pg_insert(User).values(email=DEFAULT_USER_EMAIL).on_conflict_do_nothing(index_elements=["email"]))
-    user_id = (await db.execute(select(User.id).where(User.email == DEFAULT_USER_EMAIL))).scalar_one()
-    return user_id
-
-
-async def find_default_user_id(db: AsyncSession) -> int | None:
-    """The local user's id if it exists, without creating it (reads must not write)."""
-    return (await db.execute(select(User.id).where(User.email == DEFAULT_USER_EMAIL))).scalar_one_or_none()
-
-
 async def get_conversation(
     db: AsyncSession, repository_id: int, conversation_id: int, user_id: int | None = None
 ) -> Conversation:
     """A conversation of this repository, or `ConversationNotFoundError` (also for another repository's).
 
-    Pass `user_id` to also require that the conversation belongs to that user; the routes always do. Until
-    authentication exists the user is the local default one (see `docs/rag.md`, "Ownership").
+    Pass `user_id` to also require that the conversation belongs to that user; the routes always do, with the
+    signed-in user's id (see `docs/rag.md`, "Ownership").
     """
     query = select(Conversation).where(Conversation.id == conversation_id, Conversation.repository_id == repository_id)
     if user_id is not None:

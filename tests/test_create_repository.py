@@ -1,13 +1,16 @@
-"""Tests for POST /repositories. GitHub and the database are both mocked here."""
+"""Tests for POST /repositories. GitHub and the database are both mocked here (ownership: test_ownership.py)."""
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError, OperationalError
 
+from apps.api.core.auth import Principal, require_csrf
+from apps.api.main import app
 from apps.api.models.entities import Repository
 from apps.api.services.github import (
     GitHubRateLimitedError,
@@ -24,6 +27,22 @@ REACT_METADATA = GitHubRepositoryMetadata(
     default_branch="main",
     description="The library for web and native user interfaces.",
 )
+
+
+@pytest.fixture(autouse=True)
+def signed_in():
+    """These tests are about GitHub and database failures, so the caller is simply a signed-in user."""
+    app.dependency_overrides[require_csrf] = lambda: Principal(user=SimpleNamespace(id=1), session=SimpleNamespace(id=1))
+    yield
+    app.dependency_overrides.pop(require_csrf, None)
+
+
+def _existing_repository() -> Repository:
+    return Repository(
+        id=7, github_repo_id=REACT_METADATA.github_repo_id, github_account_id=None, full_name="facebook/react",
+        default_branch="main", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc), ingestion_status="completed",
+        last_ingested_commit_sha="a" * 40, ingestion_truncated=False, last_ingested_at=None, ingestion_error=None,
+    )
 
 
 def _unique_violation_integrity_error() -> IntegrityError:
@@ -88,28 +107,30 @@ def test_create_repository_maps_github_errors_to_http_status(
     assert response.status_code == expected_status
 
 
-def test_create_repository_returns_409_when_already_imported(
+def test_create_repository_reuses_an_already_imported_repository(
     client: TestClient, db_session: AsyncMock, github_service: AsyncMock
 ) -> None:
     github_service.get_repository_metadata.return_value = REACT_METADATA
-    db_session.execute.return_value.scalar_one_or_none.return_value = MagicMock()
+    db_session.execute.return_value.scalar_one_or_none.return_value = _existing_repository()
 
     response = client.post("/repositories", json={"github_url": "https://github.com/facebook/react"})
 
-    assert response.status_code == 409
+    assert response.status_code == 200  # joined, not created: nothing is imported twice
+    assert response.json()["id"] == 7 and response.json()["viewer_access"] == "member"
     db_session.add.assert_not_called()
 
 
-def test_create_repository_returns_409_on_unique_violation_race(
+def test_create_repository_joins_the_winner_on_unique_violation_race(
     client: TestClient, db_session: AsyncMock, github_service: AsyncMock
 ) -> None:
     github_service.get_repository_metadata.return_value = REACT_METADATA
     db_session.execute.return_value.scalar_one_or_none.return_value = None
-    db_session.commit.side_effect = _unique_violation_integrity_error()
+    db_session.execute.return_value.scalar_one.return_value = _existing_repository()
+    db_session.commit.side_effect = [_unique_violation_integrity_error(), None]
 
     response = client.post("/repositories", json={"github_url": "https://github.com/facebook/react"})
 
-    assert response.status_code == 409
+    assert response.status_code == 200 and response.json()["id"] == 7
     db_session.rollback.assert_awaited_once()
 
 

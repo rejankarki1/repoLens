@@ -1,6 +1,7 @@
 """Repository API request/response schemas."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,6 +18,8 @@ class RepositoryResponse(BaseModel):
     ingestion_truncated: bool
     last_ingested_at: datetime | None
     ingestion_error: str | None
+    # "member": in your workspace. "guest": a showcase repository you may only browse. Set by the API per caller.
+    viewer_access: Literal["member", "guest"] | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

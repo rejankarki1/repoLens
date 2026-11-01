@@ -101,6 +101,16 @@ class Repository(Base):
     )
 
 
+class UserRepository(Base):
+    """A repository in a user's workspace. Repository data itself (files, chunks, analyses) is shared by all members."""
+
+    __tablename__ = "user_repositories"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"), primary_key=True, index=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 

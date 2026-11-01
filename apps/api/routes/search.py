@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.config import get_settings
 from apps.api.core.database import get_db
 from apps.api.core.queue import EMBEDDING_JOB_FUNC, enqueue_embedding, get_queue, live_repository_ids
+from apps.api.services.access import RepoAccess, member_read, member_write
 from apps.api.schemas.search import IndexStatusResponse, SearchHitResponse, SearchResponse
 from apps.api.services.code_search import (
     NotIndexedError,
@@ -34,6 +35,7 @@ async def search_code(
     mode: Literal["hybrid", "keyword", "semantic"] = Query("hybrid"),
     db: AsyncSession = Depends(get_db),
     embedder: GeminiEmbedder | None = Depends(get_embedder),
+    access: RepoAccess = Depends(member_read),
 ) -> SearchResponse:
     """Search the repository's current snapshot. `hybrid` combines keyword and semantic results and
     quietly falls back to keyword-only (with a warning) when semantic search is unavailable."""
@@ -63,6 +65,7 @@ async def get_search_index(
     repository_id: int,
     db: AsyncSession = Depends(get_db),
     embedder: GeminiEmbedder | None = Depends(get_embedder),
+    access: RepoAccess = Depends(member_read),
 ) -> IndexStatusResponse:
     """Source-ingestion and embedding-index readiness, kept separate on purpose."""
     try:
@@ -78,6 +81,7 @@ async def build_search_index(
     db: AsyncSession = Depends(get_db),
     queue: Queue = Depends(get_queue),
     embedder: GeminiEmbedder | None = Depends(get_embedder),
+    access: RepoAccess = Depends(member_write),
 ) -> IndexStatusResponse:
     """Queue the background job that embeds this repository's missing chunks (safe to repeat)."""
     try:

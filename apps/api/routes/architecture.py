@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.core.database import get_db
 from apps.api.core.queue import enqueue_architecture, get_queue
 from apps.api.schemas.architecture import AnalysisStatus, ArchitectureResponse, NodeDetailResponse, QueueResponse
+from apps.api.services.access import RepoAccess, member_write, read_access
 from apps.api.services.architecture import store
 
 router = APIRouter(tags=["architecture"])
@@ -19,6 +20,7 @@ async def request_architecture_analysis(
     force: bool = Query(False, description="Re-analyze even when the stored result is current"),
     db: AsyncSession = Depends(get_db),
     queue: Queue = Depends(get_queue),
+    access: RepoAccess = Depends(member_write),
 ) -> QueueResponse:
     """Queue an analysis of the repository's current ingested commit (safe to repeat).
 
@@ -39,7 +41,9 @@ async def request_architecture_analysis(
 
 
 @router.get("/repositories/{repository_id}/architecture/status", response_model=AnalysisStatus)
-async def get_architecture_status(repository_id: int, db: AsyncSession = Depends(get_db)) -> AnalysisStatus:
+async def get_architecture_status(
+    repository_id: int, db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(read_access)
+) -> AnalysisStatus:
     """Cheap status of the latest attempt and the freshness of the stored result (poll this while queued/running)."""
     try:
         return await store.get_status(db, repository_id)
@@ -48,7 +52,9 @@ async def get_architecture_status(repository_id: int, db: AsyncSession = Depends
 
 
 @router.get("/repositories/{repository_id}/architecture", response_model=ArchitectureResponse)
-async def get_architecture(repository_id: int, db: AsyncSession = Depends(get_db)) -> ArchitectureResponse:
+async def get_architecture(
+    repository_id: int, db: AsyncSession = Depends(get_db), access: RepoAccess = Depends(read_access)
+) -> ArchitectureResponse:
     """The high-level view (modules and the dependencies between them) of the last completed analysis.
 
     The result describes `analysis.analyzed_commit_sha`; `analysis.freshness` is `stale` when the repository has
@@ -68,6 +74,7 @@ async def get_architecture_node(
     repository_id: int,
     id: str = Query(min_length=1, max_length=1100, description='A node id from the graph: "module:<dir>" or "file:<path>"'),
     db: AsyncSession = Depends(get_db),
+    access: RepoAccess = Depends(read_access),
 ) -> NodeDetailResponse:
     """File-level detail for one module (its files and their dependencies) or one file."""
     try:
