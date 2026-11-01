@@ -298,3 +298,44 @@ async def test_sign_in_traffic_is_limited_per_ip_and_reports_it_to_the_web_app(l
     finally:
         app.dependency_overrides.pop(get_redis, None)
         app.dependency_overrides.pop(oauth.get_oauth_client, None)
+
+
+# --- a client that goes away mid-answer --------------------------------------------------------------------------
+
+async def test_a_stream_the_client_abandons_gives_its_quota_and_slot_back(limiter) -> None:
+    from apps.api.routes.conversations import _guarded
+    from apps.api.services.quota import GLOBAL_SLOT_KEY, reserve_ai_question
+
+    settings = make_settings(ai_daily_limit_per_user=1, ai_burst_limit=100, ai_global_concurrency=1)
+    quota = await reserve_ai_question(limiter, settings, 5)
+
+    async def answer():
+        yield "event: retrieval\ndata: {}\n\n"
+        yield "event: token\ndata: {}\n\n"
+        yield "event: done\ndata: {}\n\n"  # never reached: the client left first
+
+    stream = _guarded(answer(), quota)
+    await stream.__anext__()
+    await stream.__anext__()
+    await stream.aclose()  # what the server does when the browser disconnects
+
+    assert await limiter.acquire(GLOBAL_SLOT_KEY, 1, 60)  # the generation slot is free again
+    again = await reserve_ai_question(limiter, make_settings(ai_daily_limit_per_user=1, ai_burst_limit=100), 5)
+    await again.finish(False)  # and the abandoned answer did not use the user's only daily question
+
+
+async def test_a_completed_stream_keeps_its_quota(limiter) -> None:
+    from apps.api.routes.conversations import _guarded
+    from apps.api.services.quota import reserve_ai_question
+
+    settings = make_settings(ai_daily_limit_per_user=1, ai_burst_limit=100)
+    quota = await reserve_ai_question(limiter, settings, 6)
+
+    async def answer():
+        yield "event: token\ndata: {}\n\n"
+        yield 'event: done\ndata: {"saved": true}\n\n'
+
+    assert [chunk async for chunk in _guarded(answer(), quota)]
+    with pytest.raises(Exception) as caught:
+        await reserve_ai_question(limiter, settings, 6)
+    assert getattr(caught.value, "status_code", None) == 429
