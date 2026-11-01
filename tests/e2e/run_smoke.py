@@ -131,6 +131,7 @@ def main() -> int:
             except subprocess.TimeoutExpired:
                 p.kill()
         shutil.rmtree(profile, ignore_errors=True)
+        subprocess.run([sys.executable, "-c", "import redis,os; redis.Redis.from_url(os.environ['REDIS_URL']).flushdb()"], cwd=ROOT, env=env, check=False)
         try:
             asyncio.run(drop_database(db_name))
         except Exception as exc:  # best effort
