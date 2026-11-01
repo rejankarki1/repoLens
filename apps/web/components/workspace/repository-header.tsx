@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { ExternalLink, GitBranch, GitCommitHorizontal, RefreshCw } from 'lucide-react'
 import { GitHubIcon } from '@/components/icons'
 import { IndexingProgressBar, IndexingStatus } from '@/components/indexing-status'
+import { AddToWorkspace } from '@/components/auth/access-prompt'
 import { LanguageDot } from '@/components/language-dot'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -97,6 +98,11 @@ export function RepositoryHeader({ id }: { id: string }) {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          {repo.viewerAccess === 'guest' && (
+            <span className="hidden rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground sm:inline">
+              Showcase · read-only
+            </span>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -106,10 +112,14 @@ export function RepositoryHeader({ id }: { id: string }) {
             <ExternalLink aria-hidden="true" />
             <span className="max-sm:sr-only">GitHub</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={handleReanalyze} disabled={busy || reanalyzing}>
-            <RefreshCw className={busy || reanalyzing ? 'animate-spin' : undefined} aria-hidden="true" />
-            <span className="max-sm:sr-only">Re-analyze</span>
-          </Button>
+          {repo.viewerAccess === 'member' ? (
+            <Button variant="outline" size="sm" onClick={handleReanalyze} disabled={busy || reanalyzing}>
+              <RefreshCw className={busy || reanalyzing ? 'animate-spin' : undefined} aria-hidden="true" />
+              <span className="max-sm:sr-only">Re-analyze</span>
+            </Button>
+          ) : (
+            <AddToWorkspace repo={repo} />
+          )}
         </div>
       </div>
 

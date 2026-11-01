@@ -114,7 +114,7 @@ class GitHubOAuthClient:
                 raise OAuthError("oauth_failed")
             try:
                 profile = await client.get(
-                    f"{s.github_api_base_url.rstrip('/')}/user",
+                    f"{s.oauth_api_base_url}/user",
                     headers={
                         "Authorization": f"Bearer {token}",
                         "Accept": "application/vnd.github+json",
@@ -139,7 +139,7 @@ class GitHubOAuthClient:
         try:
             await client.request(
                 "DELETE",
-                f"{s.github_api_base_url.rstrip('/')}/applications/{s.github_oauth_client_id}/token",
+                f"{s.oauth_api_base_url}/applications/{s.github_oauth_client_id}/token",
                 json={"access_token": token},
                 auth=(s.github_oauth_client_id or "", s.github_oauth_client_secret.get_secret_value() if s.github_oauth_client_secret else ""),
                 headers={"Accept": "application/vnd.github+json"},

@@ -24,7 +24,8 @@ export function StatusStrip({
   status, onRerun, rerunning,
 }: {
   status: AnalysisStatus
-  onRerun: () => void
+  /** Omitted for guests, who cannot start an analysis. */
+  onRerun?: () => void
   rerunning: boolean
 }) {
   const active = status.status === 'queued' || status.status === 'running'
@@ -50,10 +51,12 @@ export function StatusStrip({
           {status.analyzed_at && <> · analyzed {formatRelativeTime(status.analyzed_at)}</>}
         </span>
       )}
-      <Button size="xs" variant="outline" className="ml-auto" onClick={onRerun} disabled={active || rerunning}>
-        <RefreshCw className={cn(rerunning && 'animate-spin')} aria-hidden="true" />
-        Re-run analysis
-      </Button>
+      {onRerun && (
+        <Button size="xs" variant="outline" className="ml-auto" onClick={onRerun} disabled={active || rerunning}>
+          <RefreshCw className={cn(rerunning && 'animate-spin')} aria-hidden="true" />
+          Re-run analysis
+        </Button>
+      )}
     </div>
   )
 }

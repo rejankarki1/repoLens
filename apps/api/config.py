@@ -108,6 +108,7 @@ class Settings(BaseSettings):
     github_oauth_client_secret: SecretStr | None = None  # never logged or returned by the API
     github_oauth_authorize_url: str = "https://github.com/login/oauth/authorize"
     github_oauth_token_url: str = "https://github.com/login/oauth/access_token"
+    github_oauth_api_base_url: str | None = None  # where `GET /user` is read; defaults to github_api_base_url
     github_oauth_timeout_seconds: float = 10.0
     oauth_state_ttl_seconds: int = 600
     session_ttl_seconds: int = 14 * 24 * 3600  # absolute lifetime of a session
@@ -140,6 +141,10 @@ class Settings(BaseSettings):
     @property
     def github_oauth_redirect_uri(self) -> str:
         return f"{self.api_public_url.rstrip('/')}/auth/github/callback"
+
+    @property
+    def oauth_api_base_url(self) -> str:
+        return (self.github_oauth_api_base_url or self.github_api_base_url).rstrip("/")
 
     @property
     def github_login_enabled(self) -> bool:

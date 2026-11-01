@@ -33,6 +33,8 @@ export function ArchitectureExplorer({ repo }: { repo: Repository }) {
   const [requestError, setRequestError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const { mutate: refreshStatus } = status
+  // Starting an analysis is a member action; guests only read what the showcase already has.
+  const canAnalyze = repo.viewerAccess === 'member'
 
   const request = useCallback(
     async (force: boolean) => {
@@ -53,14 +55,14 @@ export function ArchitectureExplorer({ repo }: { repo: Repository }) {
   // Ask for an analysis once per commit when there is none (or only an older one); never loop on failure.
   const data = status.data
   useEffect(() => {
-    if (!data || !shouldAutoRequest(data)) return
+    if (!canAnalyze || !data || !shouldAutoRequest(data)) return
     const key = autoRequestKey(data)
     if (autoRequested.has(key)) return
     autoRequested.add(key)
     requestArchitectureAnalysis(repo.id)
       .then(() => refreshStatus())
       .catch((err) => setRequestError(messageOf(err)))
-  }, [data, repo.id, refreshStatus])
+  }, [canAnalyze, data, repo.id, refreshStatus])
 
   if (status.isLoading) return <ExplorerSkeleton />
   if (status.error || !data) return <ErrorState message={messageOf(status.error)} onRetry={() => void refreshStatus()} />
@@ -70,7 +72,7 @@ export function ArchitectureExplorer({ repo }: { repo: Repository }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <StatusStrip status={data} onRerun={rerun} rerunning={submitting} />
+      <StatusStrip status={data} onRerun={canAnalyze ? rerun : undefined} rerunning={submitting} />
       <StatusBanners status={data} requestError={requestError} />
       <div className="min-h-0 flex-1">
         {graph ? (

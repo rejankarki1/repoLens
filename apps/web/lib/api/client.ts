@@ -3,8 +3,11 @@ import { buildFileTree } from '@/lib/repo-utils'
 import type { FileSummary } from '@/lib/repo-stats'
 import type { CodeLanguage, FileTreeNode, IndexingState, Repository, SourceFile } from '@/lib/types'
 
-/** Inlined at build time (see `.env.example`). */
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:8765').replace(/\/+$/, '')
+import { API_URL } from '@/lib/api/config'
+import { getCsrfToken, isSafeMethod, withAuth } from '@/lib/auth/csrf'
+import { ensureCsrfToken } from '@/lib/auth/session'
+
+export { API_URL }
 
 /* ------------------------------ Backend shapes ------------------------------ */
 
@@ -19,6 +22,7 @@ interface ApiRepository {
   ingestion_truncated: boolean
   last_ingested_at: string | null
   ingestion_error: string | null
+  viewer_access?: 'member' | 'guest' | null
 }
 
 interface ApiFileSummary {
@@ -51,10 +55,19 @@ function describeDetail(detail: unknown, fallback: string): string {
   return fallback
 }
 
+/**
+ * `fetch` for the API: sends the session cookie, and the CSRF token on writes (loading it first if this page has
+ * not yet). Every call to the API goes through here.
+ */
+export async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  if (!isSafeMethod(init?.method) && !getCsrfToken()) await ensureCsrfToken()
+  return fetch(url, withAuth(init, getCsrfToken()))
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
-    response = await fetch(`${API_URL}${path}`, init)
+    response = await apiFetch(`${API_URL}${path}`, init)
   } catch {
     throw new ApiError(0, `Could not reach the RepoLens API at ${API_URL}. Is the backend running?`)
   }
@@ -93,6 +106,7 @@ function toRepository(api: ApiRepository): Repository {
     // The backend reports no percentage; null renders an indeterminate bar.
     progress: null,
     error: api.ingestion_status === 'failed' ? api.ingestion_error : null,
+    viewerAccess: api.viewer_access === 'guest' ? 'guest' : 'member',
   }
 }
 

@@ -1,12 +1,16 @@
 'use client'
 
 import { FolderGit2 } from 'lucide-react'
+import { GitHubSignIn } from '@/components/auth/github-sign-in'
 import { RepositoryCard } from '@/components/repository-card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRepositories } from '@/lib/api/hooks'
+import { useAuth } from '@/lib/auth/use-auth'
 
 export function RepositoryList({ limit, filter = '' }: { limit?: number; filter?: string }) {
   const { data, error, isLoading } = useRepositories()
+  const { authenticated, loading: authLoading } = useAuth()
+  const guest = !authLoading && !authenticated
 
   if (isLoading) {
     return (
@@ -29,8 +33,23 @@ export function RepositoryList({ limit, filter = '' }: { limit?: number; filter?
   const q = filter.trim().toLowerCase()
   const repositories = (data ?? []).filter((r) => !q || r.fullName.toLowerCase().includes(q)).slice(0, limit)
 
+  const guestNotice = guest && (
+    <div role="note" className="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-muted-foreground">
+        <span className="font-medium text-foreground">You are browsing the showcase.</span> These repositories are open to
+        everyone to explore. Sign in with GitHub to analyze your own and ask questions.
+      </p>
+      <GitHubSignIn next="/repositories" size="sm" className="shrink-0" />
+    </div>
+  )
+
   if (repositories.length === 0) {
-    return (
+    return guest ? (
+      <div className="flex flex-col gap-3">
+        {guestNotice}
+        <p className="text-sm text-muted-foreground">No showcase repositories are available yet.</p>
+      </div>
+    ) : (
       <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-6 py-12 text-center">
         <div className="flex size-10 items-center justify-center rounded-lg bg-muted">
           <FolderGit2 className="size-5 text-muted-foreground" aria-hidden="true" />
@@ -46,10 +65,13 @@ export function RepositoryList({ limit, filter = '' }: { limit?: number; filter?
   }
 
   return (
-    <ul className="grid gap-3 lg:grid-cols-2">
-      {repositories.map((repo) => (
-        <RepositoryCard key={repo.id} repository={repo} />
-      ))}
-    </ul>
+    <div className="flex flex-col gap-3">
+      {guestNotice}
+      <ul className="grid gap-3 lg:grid-cols-2">
+        {repositories.map((repo) => (
+          <RepositoryCard key={repo.id} repository={repo} />
+        ))}
+      </ul>
+    </div>
   )
 }

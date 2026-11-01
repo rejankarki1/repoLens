@@ -6,7 +6,8 @@ import { AlertCircle, Clock, FolderX, Loader2 } from 'lucide-react'
 import { IndexingProgressBar } from '@/components/indexing-status'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { describeIngestionError, startIngestion } from '@/lib/api/client'
+import { GitHubSignIn } from '@/components/auth/github-sign-in'
+import { ApiError, describeIngestionError, startIngestion } from '@/lib/api/client'
 import { useRepository } from '@/lib/api/hooks'
 import type { Repository } from '@/lib/types'
 
@@ -24,6 +25,17 @@ export function RepositoryGate({ id, children }: { id: string; children: (repo: 
         <Skeleton className="h-24 w-full max-w-3xl" />
         <Skeleton className="h-24 w-full max-w-3xl" />
       </div>
+    )
+  }
+
+  if (error instanceof ApiError && error.status === 401) {
+    return (
+      <StateMessage icon={<FolderX className="size-5 text-muted-foreground" aria-hidden="true" />} title="Sign in to view this repository">
+        This repository is not part of the public showcase. Sign in with GitHub to open your own repositories.
+        <div className="mt-2">
+          <GitHubSignIn next={typeof window === 'undefined' ? '/repositories' : window.location.pathname + window.location.search} />
+        </div>
+      </StateMessage>
     )
   }
 

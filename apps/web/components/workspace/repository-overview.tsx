@@ -24,7 +24,7 @@ function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; v
 
 export function RepositoryOverview({ repo }: { repo: Repository }) {
   const stats = useRepositoryStats(repo)
-  const conversations = useConversations(repo.id)
+  const conversations = useConversations(repo.id, repo.viewerAccess === 'member')
   const saved = conversations.data?.length ?? 0
 
   const actions = [

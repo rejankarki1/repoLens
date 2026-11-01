@@ -1,4 +1,4 @@
-import { API_URL, ApiError } from '@/lib/api/client'
+import { API_URL, ApiError, apiFetch } from '@/lib/api/client'
 import { readSse } from '@/lib/api/sse'
 
 /* ------------------------------ Backend shapes ------------------------------ */
@@ -174,7 +174,7 @@ async function detailOf(response: Response): Promise<string> {
 async function send(url: string, init?: RequestInit): Promise<Response> {
   let response: Response
   try {
-    response = await fetch(url, init)
+    response = await apiFetch(url, init)
   } catch {
     throw new ApiError(0, `Could not reach the RepoLens API at ${API_URL}. Is the backend running?`)
   }
@@ -242,7 +242,7 @@ export async function streamQuestion(
 ): Promise<void> {
   let response: Response
   try {
-    response = await fetch(`${base(repoId)}/${conversationId}/messages/stream`, {
+    response = await apiFetch(`${base(repoId)}/${conversationId}/messages/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
       body: JSON.stringify({ content: question }),

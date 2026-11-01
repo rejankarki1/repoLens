@@ -92,8 +92,9 @@ export function useArchitectureNode(repo: Repository | undefined, nodeId: string
   )
 }
 
-export function useConversations(repoId: string) {
-  return useSWR(['conversations', repoId], () => listConversations(repoId))
+/** Conversations are personal to workspace members; guests have none and never ask for them. */
+export function useConversations(repoId: string, enabled = true) {
+  return useSWR(enabled ? ['conversations', repoId] : null, () => listConversations(repoId))
 }
 
 /** Embedding-index readiness; only informs the UI, chatting works without it (keyword fallback). */
