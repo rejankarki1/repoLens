@@ -1,17 +1,37 @@
 """Shared pytest fixtures for API tests."""
 
 # Isolate the test run from the development environment BEFORE anything reads the settings. The developer's `.env`
-# points at their real Redis (db 0) and the real `ingestion` queue; code under test that enqueues work (for example a
-# completed ingestion queuing embeddings when a Gemini key is set) must land in a dedicated Redis database and queue.
+# points at their real PostgreSQL database, their real Redis (db 0, the `ingestion` queue) and live provider keys.
+# Overriding the environment variables (which outrank `.env`) makes EVERY reader of the settings land in disposable
+# resources, including the job entry points that open their own engine, Alembic, and `Settings()` built in tests.
 import os
 from urllib.parse import urlsplit, urlunsplit
 
+import pytest
+from sqlalchemy.engine import make_url
+
 from apps.api.config import Settings as _Settings
 
-_redis = urlsplit(os.environ.get("REDIS_URL") or _Settings().redis_url)
-os.environ["REDIS_URL"] = urlunsplit(_redis._replace(path="/15"))
+TEST_DATABASE = "repolens_test"
+TEST_REDIS_DB = 15
+_LOOPBACK = {"localhost", "127.0.0.1", "::1"}
+_dev = _Settings()  # reads the real environment and .env, only to learn which servers to use
+
+_db = make_url(os.environ.get("DATABASE_URL") or _dev.database_url)
+_redis = urlsplit(os.environ.get("REDIS_URL") or _dev.redis_url)
+if (_db.host not in _LOOPBACK or (_redis.hostname or "") not in _LOOPBACK) and os.environ.get("REPOLENS_TEST_ALLOW_REMOTE") != "1":
+    pytest.exit(
+        f"Refusing to run: DATABASE_URL host {_db.host!r} / REDIS_URL host {_redis.hostname!r} is not local. The tests create, "
+        "reset and drop databases and flush a Redis database. Point them at a local server, or set REPOLENS_TEST_ALLOW_REMOTE=1 "
+        "if this really is a disposable CI service.",
+        returncode=2,
+    )
+os.environ["DATABASE_URL"] = _db.set(database=TEST_DATABASE).render_as_string(hide_password=False)
+os.environ["REDIS_URL"] = urlunsplit(_redis._replace(path=f"/{TEST_REDIS_DB}"))
 os.environ["INGESTION_QUEUE_NAME"] = "repolens-test-ingestion"
 os.environ["INGESTION_SWEEP_INTERVAL_SECONDS"] = "0"
+for _secret in ("GEMINI_API_KEY", "GROQ_API_KEY", "GITHUB_TOKEN", "GITHUB_OAUTH_CLIENT_SECRET"):
+    os.environ[_secret] = ""  # tests use fakes; a stray real call must be impossible, not merely unlikely
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator
@@ -40,7 +60,8 @@ from apps.api.models.entities import GitHubAccount, Repository, User, UserReposi
 from apps.api.services.sessions import create_session
 from apps.api.services.github import get_github_service
 
-_TEST_DB_NAME = "repolens_test"
+_TEST_DB_NAME = TEST_DATABASE
+_REDIS_MARKER = "repolens:test-database-marker"
 
 
 @pytest.fixture
@@ -95,13 +116,14 @@ def _test_database_url() -> URL:
 
 
 async def _admin_connection() -> asyncpg.Connection:
+    """The server's maintenance database `postgres`: the tests never open a connection to a developer's own database."""
     admin_url = make_url(get_settings().database_url)
     return await asyncpg.connect(
         user=admin_url.username,
         password=admin_url.password,
         host=admin_url.host,
         port=admin_url.port,
-        database=admin_url.database,
+        database="postgres",
     )
 
 
@@ -120,6 +142,11 @@ async def _reset_test_schema() -> None:
     engine = create_async_engine(_test_database_url())
     try:
         async with engine.begin() as conn:
+            # `drop_all` below is destructive: only ever run it on a database that holds no application data.
+            if await conn.scalar(text("SELECT to_regclass('public.repositories')")) is not None:
+                rows = await conn.scalar(text("SELECT (SELECT count(*) FROM repositories) + (SELECT count(*) FROM conversations)"))
+                if rows:
+                    raise RuntimeError(f"{TEST_DATABASE} contains {rows} rows of application data; refusing to reset it")
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))  # code_embeddings uses pgvector
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
@@ -158,16 +185,28 @@ def _never_touch_the_development_database(_prepared_test_database: None) -> Iter
     from apps.api.core import database
     from redis import Redis
 
+    assert make_url(str(database.engine.url)).database == TEST_DATABASE, "the app's engine must point at the test database"
     test_engine = create_async_engine(_test_database_url())
     database.session_factory.configure(bind=test_engine)
+
+    # Redis database 15 is flushed afterwards, so claim it first: only run if it is empty or carries our marker.
+    owned = False
+    try:
+        redis = Redis.from_url(get_settings().redis_url)
+        if redis.dbsize() and not redis.exists(_REDIS_MARKER):
+            pytest.exit(f"Refusing to run: Redis database {TEST_REDIS_DB} is not empty and was not created by the tests.", returncode=2)
+        redis.set(_REDIS_MARKER, "1")
+        owned = True
+    except pytest.exit.Exception:
+        raise
+    except Exception:  # Redis is down: tests that need it will say so themselves
+        redis = None
     yield
     asyncio.run(test_engine.dispose())
-    try:  # the test Redis database (db 15) is ours alone: leave it empty
-        cleaner = Redis.from_url(get_settings().redis_url)
-        cleaner.flushdb()
-        cleaner.close()
-    except Exception:  # Redis may be down; nothing to clean then
-        pass
+    if owned and redis is not None:
+        redis.flushdb()
+    if redis is not None:
+        redis.close()
 
 
 @pytest.fixture

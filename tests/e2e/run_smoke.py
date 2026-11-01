@@ -25,6 +25,10 @@ from sqlalchemy.engine import make_url
 from apps.api.config import get_settings
 
 ROOT = Path(__file__).resolve().parents[2]
+DB_MARKER = "repolens-disposable-e2e-database"  # a database comment: only databases carrying it are ever dropped
+REDIS_MARKER = "repolens:e2e-database-marker"  # only a Redis database that is empty or carries this key is ever flushed
+REDIS_DB = 9
+LOOPBACK = {"localhost", "127.0.0.1", "::1"}
 PORTS = {"API": 8790, "WEB": 3190, "GH": 8791, "CDP": 9390}
 CHROME_CANDIDATES = [
     "google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
@@ -50,29 +54,61 @@ def wait_for(url: str, seconds: int = 90) -> None:
     sys.exit(f"timed out waiting for {url}")
 
 
+async def _admin(url):
+    return await asyncpg.connect(user=url.username, password=url.password, host=url.host, port=url.port, database="postgres")
+
+
 async def recreate_database(name: str) -> None:
-    url = make_url(get_settings().database_url)
-    admin = await asyncpg.connect(user=url.username, password=url.password, host=url.host, port=url.port, database="postgres")
+    """(Re)create the disposable database, but never drop one that this script did not create."""
+    admin = await _admin(make_url(get_settings().database_url))
     try:
-        await admin.execute(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)")
+        exists = await admin.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", name)
+        if exists:
+            comment = await admin.fetchval("SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = $1", name)
+            if comment != DB_MARKER:
+                sys.exit(f"Refusing to drop database {name!r}: it was not created by this smoke test. Set E2E_DATABASE to a free name.")
+            await admin.execute(f"DROP DATABASE {name} WITH (FORCE)")
         await admin.execute(f"CREATE DATABASE {name}")
+        await admin.execute(f"COMMENT ON DATABASE {name} IS '{DB_MARKER}'")
     finally:
         await admin.close()
 
 
 async def drop_database(name: str) -> None:
-    url = make_url(get_settings().database_url)
-    admin = await asyncpg.connect(user=url.username, password=url.password, host=url.host, port=url.port, database="postgres")
+    admin = await _admin(make_url(get_settings().database_url))
     try:
-        await admin.execute(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)")
+        comment = await admin.fetchval("SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = $1", name)
+        if comment == DB_MARKER:  # only ever drop what we created
+            await admin.execute(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)")
     finally:
         await admin.close()
+
+
+def claim_redis(url: str) -> None:
+    """Refuse to touch a Redis database that holds somebody else's data; otherwise mark it as ours."""
+    import redis
+
+    client = redis.Redis.from_url(url)
+    if client.dbsize() and not client.exists(REDIS_MARKER):
+        sys.exit(f"Refusing to use Redis database {REDIS_DB}: it is not empty and was not created by the smoke test.")
+    client.set(REDIS_MARKER, "1")
+
+
+def release_redis(url: str) -> None:
+    import redis
+
+    client = redis.Redis.from_url(url)
+    if client.exists(REDIS_MARKER):  # flush only what we claimed
+        client.flushdb()
 
 
 def main() -> int:
     db_name = os.environ.get("E2E_DATABASE", "repolens_e2e")
     dev = make_url(get_settings().database_url)
-    redis = make_url(get_settings().redis_url).set(database="9").render_as_string(hide_password=False)  # not the dev Redis DB
+    redis = make_url(get_settings().redis_url).set(database=str(REDIS_DB)).render_as_string(hide_password=False)  # not the dev Redis DB
+    redis_host = make_url(redis).host
+    if (dev.host not in LOOPBACK or redis_host not in LOOPBACK) and os.environ.get("REPOLENS_TEST_ALLOW_REMOTE") != "1":
+        sys.exit("Refusing to run: the database or Redis host is not local (set REPOLENS_TEST_ALLOW_REMOTE=1 for a disposable CI service).")
     api, web, gh, cdp = (PORTS[k] for k in ("API", "WEB", "GH", "CDP"))
     env = {
         **os.environ,
@@ -105,8 +141,7 @@ def main() -> int:
     try:
         asyncio.run(recreate_database(db_name))
         subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=ROOT, env=env, check=True, capture_output=True)
-        # a scratch Redis database: start empty
-        subprocess.run([sys.executable, "-c", "import redis,os; redis.Redis.from_url(os.environ['REDIS_URL']).flushdb()"], cwd=ROOT, env=env, check=True)
+        claim_redis(redis)  # exits instead of flushing a Redis database that is not ours
         start([sys.executable, "-m", "tests.e2e.fake_github", "--port", str(gh)])
         start([sys.executable, "-m", "uvicorn", "apps.api.main:app", "--port", str(api)])
         start([sys.executable, "-m", "apps.api.worker"])
@@ -131,7 +166,10 @@ def main() -> int:
             except subprocess.TimeoutExpired:
                 p.kill()
         shutil.rmtree(profile, ignore_errors=True)
-        subprocess.run([sys.executable, "-c", "import redis,os; redis.Redis.from_url(os.environ['REDIS_URL']).flushdb()"], cwd=ROOT, env=env, check=False)
+        try:
+            release_redis(redis)
+        except Exception as exc:  # best effort
+            print(f"could not release Redis database {REDIS_DB}: {exc}", file=sys.stderr)
         try:
             asyncio.run(drop_database(db_name))
         except Exception as exc:  # best effort

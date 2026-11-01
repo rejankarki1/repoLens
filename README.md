@@ -123,6 +123,8 @@ apps/api/venv/bin/python -m pytest -q           # backend; needs PostgreSQL with
 cd apps/web && npm test && npm run typecheck && npm run lint && npm run build
 ```
 
+**Test isolation.** The tests can never reach your development data: before anything reads the settings, `tests/conftest.py` points `DATABASE_URL` at `repolens_test`, `REDIS_URL` at database 15 with its own queue name, and blanks the Gemini, Groq and GitHub secrets, so every reader of the settings (including job entry points and Alembic) lands in disposable resources. The suite refuses to start if the database or Redis host is not local (override with `REPOLENS_TEST_ALLOW_REMOTE=1` for a disposable CI service), if Redis database 15 holds data it did not create, or if `repolens_test` holds application data. The smoke test applies the same ownership rules to its database (`repolens_e2e`) and Redis database 9.
+
 A browser smoke test (headless Chrome, a fake GitHub, its own database, Redis database and ports) covers sign-in, the guest showcase, the paste-URL flow and isolation between users:
 
 ```bash
