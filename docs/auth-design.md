@@ -97,6 +97,25 @@ If Redis is unavailable, protected expensive operations fail closed with 503 (li
 
 Production start-up validation (secure cookies, HTTPS web URL, OAuth credentials, explicit CORS origins); restrictive CORS (methods and headers listed, `Retry-After` exposed); security headers; API docs disabled in production; access logs redact OAuth `code` and `state`; generic error bodies; unchanged provider-key handling (`SecretStr`).
 
+## Endpoints
+
+| Method | Path | Who | Notes |
+| --- | --- | --- | --- |
+| GET | `/auth/github/login?next=` | anyone | Starts sign-in (per-IP limited). `next` is a validated relative path. |
+| GET | `/auth/github/callback` | GitHub's redirect | Validates state, creates the session, redirects to the web app (`?auth_error=` on failure). |
+| GET | `/auth/me` | anyone | `{authenticated, user, csrf_token, github_login_enabled}`; never cached. |
+| POST | `/auth/logout`, `/auth/logout-all` | signed in + CSRF | 204; the cookie is cleared. |
+| GET | `/repositories` | anyone | Your workspace; for a visitor, the showcase. Each item has `viewer_access` (`member` or `guest`). |
+| POST | `/repositories` | signed in + CSRF | Adds a public repository: 201 if new, 200 if already stored (nothing downloaded again). |
+| GET | `/repositories/{id}` and its `files`, `files/content`, `ingestion-status`, `architecture*` | member, or anyone for showcase repositories | Read-only. |
+| POST | `/repositories/{id}/ingestions`, `/embeddings`, `/architecture` | member + CSRF | Background jobs; hourly and concurrency limits. |
+| GET | `/repositories/{id}/search`, `/search-index` | member | Hybrid search spends embedding quota. |
+| * | `/repositories/{id}/conversations...` | member (owner of the conversation) + CSRF for writes | Questions are subject to the AI quotas. |
+
+Status codes: 401 not signed in; 403 missing/invalid CSRF token, or a showcase repository you have not added; 404 not found *or not yours*; 429 a usage limit (with `Retry-After` and `X-RateLimit-Scope`: `burst`, `daily`, `global`, `busy`, `import`, `import_concurrency`, `architecture`, `embeddings`, `guest`); 503 limits cannot be enforced.
+
 ## Verified and not verified
 
-Automated tests use a mocked GitHub identity service and need no OAuth credentials or AI keys. A real GitHub login needs a registered OAuth App and is documented in `README.md` ("GitHub OAuth App setup"); see `docs/release-baseline.md` for whether it has been exercised.
+- **Automated, no credentials**: unit and integration tests for sign-in (mocked GitHub identity), sessions, CSRF, ownership, guests, limits (against real Redis for atomicity) and hardening; migration tests on disposable databases; a browser smoke test against a fake GitHub that enforces PKCE. See `docs/release-baseline.md` for the counts.
+- **Rehearsed**: both migrations and the claim command on a copy of a real development database.
+- **Not verified**: a real GitHub OAuth App (needs your credentials; setup is in the README); deployment on a real domain with HTTPS and a proxy; behaviour of `__Host-` cookies in production browsers; real provider rate limits.

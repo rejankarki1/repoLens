@@ -1,6 +1,6 @@
 # RepoLens release baseline
 
-A record of what RepoLens is, how it was verified, and what is left, taken before authentication and deployment work begins. It describes a **working local application**. It is not deployed and it is not production-ready.
+A record of what RepoLens is, how it was verified, and what is left. It describes an application with GitHub sign-in, per-user workspaces and usage limits, running locally. It is not deployed and it is not production-ready. Updated for Phase 2 (authentication and security); the Milestone 0 and 1 results it replaces are in Git history and in [verification-m1.md](verification-m1.md).
 
 ## What exists
 
@@ -17,6 +17,10 @@ RepoLens ingests a public GitHub repository, indexes its code, answers questions
 | Code Explorer | File tree, source viewer, line deep links, and a per-file Dependencies panel (what the file imports and what imports it). |
 | Architecture Explorer | A deterministic, evidence-linked dependency graph of modules and files with filters, search, and drill-down. Every edge links to the import statement behind it. Technologies and architecture areas are inferred and labelled as such. No AI provider is involved. |
 | Overview | Real file, directory, line and language statistics and a summary of the stored architecture analysis. |
+| Authentication | GitHub OAuth (authorization code with PKCE, no scope), server-side sessions in HttpOnly cookies, CSRF protection, logout. See [auth-design.md](auth-design.md). |
+| Workspaces and ownership | Each user has a private workspace of repositories and private conversations; repository data is shared between users of the same public repository. Every endpoint checks membership or ownership. |
+| Guest showcase | Visitors browse an explicit allow-list of pre-indexed repositories read-only (overview, source, architecture); no imports, search, AI or conversations. |
+| Usage limits | Atomic per-user and global limits on AI questions, imports, embedding and analysis jobs, and per-IP limits for guests and sign-in, enforced in Redis. See [security.md](security.md). |
 
 Detail: [rag.md](rag.md), [search.md](search.md), [architecture.md](architecture.md), [erd.md](erd.md).
 
@@ -26,39 +30,38 @@ FastAPI, SQLAlchemy (async), Alembic, PostgreSQL 17 with pgvector 0.8.7, Redis 7
 
 ## Verified results
 
-Run on 2026-10-31 against the repository as committed plus the CI, README and documentation changes of this milestone, in two ways: on the development machine, and on a clean Linux container with no `.env`, a freshly created pgvector database and Redis, and dependencies installed from the repository's own requirements and lockfile.
+Run on 2026-11-01 on the development machine, and for the backend and frontend jobs also on a clean Linux container (fresh Python 3.14 / Node 22, empty pgvector PostgreSQL and Redis, no `.env`, dependencies from the repository's own requirements and lockfile).
 
 | Check | Result |
 | --- | --- |
-| Backend tests (`pytest`) | **604 passed**, 2 warnings (third-party deprecation notices). Also 604 passed on clean Linux, and with all outbound HTTP(S) forced to a dead proxy, which shows the tests make no real network calls. |
-| Frontend unit tests (`npm test`) | **44 passed**, 0 failed |
+| Backend tests (`pytest`) | **763 passed**, 2 warnings (third-party deprecation notices). 763 passed on clean Linux too. |
+| Frontend unit tests (`npm test`) | **49 passed**, 0 failed |
 | TypeScript (`tsc --noEmit`) | clean |
 | ESLint (`--max-warnings 0`) | 0 errors, 0 warnings |
 | Next.js production build | succeeds |
-| Alembic | `upgrade head` on an empty database applies all 8 migrations, `check` reports no drift between models and migrations, and `downgrade base` followed by `upgrade head` round-trips |
-| API start-up | `/health` returns `ok`, `/health/ready` reports database and Redis `ok`, `/repositories` returns 200 |
+| Alembic | `upgrade head` on an empty database applies all 10 migrations, `check` reports no drift, `downgrade base` then `upgrade head` round-trips. The two authentication migrations are also tested from a seeded Phase 1 schema, and were rehearsed with the claim command on a copy of a real development database (data preserved). |
+| Browser smoke test | **24 of 24 checks** (headless Chrome with real mouse and keyboard input; sign-in, guest showcase, paste-URL import, isolation between users, cancellation). Run locally against a **fake GitHub**; its GitHub Actions run has not happened yet. |
 | Workflow files | pass `actionlint` |
 
-The backend suite creates and drops its own `repolens_test` database on the server named by `DATABASE_URL`; it never touches the `repolens` database.
+The backend suite uses real PostgreSQL and real Redis (the limiter's atomicity is tested with 120 concurrent reservations against a limit of 20). It creates and drops its own `repolens_test` database, rebinds the application's session factory to it so no test can reach the development database, and makes no real network calls.
 
-Browser behaviour (citation preview, conversation management, graph navigation, mobile layouts, accessibility, error recovery) and live Groq and Gemini calls were verified end to end in Milestone 1, using headless Chrome with real input events. That is not automated and is not part of CI. See [verification-m1.md](verification-m1.md) for what was real, what used fixtures, and what was not verified.
+**Real GitHub OAuth is not verified.** No OAuth App credentials are configured, so no real GitHub login has been performed. Everything above used a mocked identity or a fake GitHub that enforces PKCE. The setup is in the README; the first real login should be watched.
 
-### Findings from the clean-machine run
-
-- Three architecture test files assume the tree-sitter grammars are already downloaded, and other test files download them lazily. On a clean machine, 29 tests failed until the grammars were fetched first. CI now has an explicit provisioning step that fails if any grammar is missing. No test or application code was changed.
-- The README was out of date (it described ingestion and the agent as planned). It now matches the application.
+Browser behaviour for Ask AI, citation previews, the Architecture Explorer and error recovery, and live Groq and Gemini calls, were verified in Milestone 1 ([verification-m1.md](verification-m1.md)); that run predates authentication and is not repeated by the smoke test.
 
 ## Continuous integration
 
-Two workflows in `.github/workflows/`, both triggered by pushes to `main` and pull requests targeting `main`, with `contents: read` permission only, one run per ref at a time, and a 20 minute limit.
+Three workflows in `.github/workflows/`, all triggered by pushes to `main` and pull requests targeting `main`, with `contents: read` permission only, one run per ref at a time, and a 20 minute limit.
 
 **Backend CI** (`backend-ci.yml`): Python 3.14 with pip caching; service containers for pgvector PostgreSQL and Redis with throwaway credentials; install `requirements-dev.txt`; fetch and cache the tree-sitter grammars; `alembic upgrade head`; `alembic check`; migration downgrade and upgrade round trip; `pytest`; start the API and check `/health`, `/health/ready` and `/repositories`.
+
+**Browser smoke test** (`e2e-smoke.yml`): the same services, then `python -m tests.e2e.run_smoke`, which boots an isolated stack (own database, Redis database 9, unique queue, fake GitHub) and runs the 24 browser checks in headless Chrome.
 
 **Frontend CI** (`frontend-ci.yml`): Node 22 with npm caching; `npm ci`; `npm test`; `npm run typecheck`; `npm run lint -- --max-warnings 0`; `npm run build` with a placeholder `NEXT_PUBLIC_API_URL`.
 
 No workflow sets a Gemini, Groq or GitHub credential. The only network access beyond installing packages is the one-time grammar download.
 
-**Remote status: not yet verified.** The workflows have been linted and every step was rehearsed locally on clean Linux, but they have not run on GitHub. This baseline is complete only once both workflows pass there.
+**Remote status.** Backend CI and Frontend CI passed on GitHub for the Phase 1 commits. The Phase 2 commits have not been pushed, so none of the three workflows has run on them; the backend and frontend jobs were rehearsed on clean Linux, the smoke test only on macOS (it needs Chrome).
 
 ## Local start-up
 
@@ -85,36 +88,46 @@ None of these hold secrets in the repository. Real values go in the git-ignored 
 | `REDIS_URL` | yes | Redis URL for the job queue and readiness check. |
 | `WEB_ORIGINS` | yes | Comma-separated browser origins allowed by CORS. |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT`, `REDIS_PORT` | for Docker Compose | Local service configuration. |
+| `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` | for sign-in | The GitHub OAuth App's credentials (secret: `.env` or the platform's secret store only). Without them nobody can sign in or import. |
+| `WEB_BASE_URL`, `API_PUBLIC_URL` | yes | Where the browser returns after sign-in, and the API's own public URL (the OAuth callback is `<API_PUBLIC_URL>/auth/github/callback`). Must be same-site. |
+| `ENVIRONMENT` | production | `production` turns on Secure `__Host-` cookies, HSTS and CSP, hides the API docs, and makes the API refuse an unsafe configuration at start-up. |
+| `GUEST_SHOWCASE_REPOSITORIES` | optional | `owner/name` list visitors may browse read-only. Empty means nothing is public. |
+| `TRUSTED_PROXIES` | behind a proxy | Addresses of reverse proxies whose `X-Forwarded-For` is believed. |
+| `AI_*`, `IMPORT_*`, `MAX_REPOSITORIES_PER_USER`, `EMBEDDING_BUILD_HOURLY_LIMIT`, `ARCHITECTURE_HOURLY_LIMIT`, `GUEST_READS_PER_MINUTE`, `AUTH_LOGIN_PER_MINUTE` | optional | Usage limits; defaults and meaning in `.env.example`. |
 | `GEMINI_API_KEY` | optional | Enables semantic search and Gemini answers. Without it, search is keyword-only, and Ask AI returns HTTP 503 unless `GENERATION_PROVIDER=groq` with a Groq key. |
 | `GENERATION_PROVIDER` | optional | `gemini` (default) or `groq`. There is no automatic fallback. |
 | `GROQ_API_KEY` | optional | Needed only when `GENERATION_PROVIDER=groq`. |
 | `GITHUB_TOKEN` | optional | Raises the GitHub rate limit from 60 to 5000 requests per hour. |
 | `EMBEDDING_MODEL`, `GEMINI_GENERATION_MODEL`, `GROQ_GENERATION_MODEL`, `ARCHITECTURE_MAX_FILES` | optional | Model names and the architecture file cap. |
-| `NEXT_PUBLIC_API_URL` | optional (web) | API base URL, inlined into the browser bundle at build time. Defaults to `http://127.0.0.1:8765`. Never put a secret here. |
+| `NEXT_PUBLIC_API_URL` | optional (web) | API base URL, inlined into the browser bundle at build time. Defaults to `http://localhost:8765`. Never put a secret here. |
 
 About 45 further tuning settings (timeouts, size limits, retrieval and retry parameters) have defaults in `apps/api/config.py`.
 
 ## Known limitations
 
-- **No authentication.** Every conversation belongs to one local default user, and the interface shows a placeholder "Alex Doe / Demo workspace" persona and a DEMO badge. Anyone who can reach the API can read and delete everything.
-- **No repository access model.** Only public GitHub repositories can be imported; there is no GitHub sign-in and no private repository support.
-- **Not deployed.** There is no production configuration, HTTPS, hosting, secrets management, backup, monitoring, or per-user quota on ingestion size or AI cost.
+- **Real GitHub sign-in is untested.** See above. Until an OAuth App is configured, only visitors and tests can use the app.
+- **Public repositories only.** There is no private repository support and no GitHub token is retained.
+- **Quotas are per account.** Anyone can create many GitHub accounts; the global daily AI budget and concurrency limit bound the total cost, but there is no CAPTCHA, email check or account-age rule. See [security.md](security.md).
+- **No account deletion or data export** flow yet (database deletes cascade).
+- **Shared repository snapshots.** A re-ingestion by any member refreshes the snapshot for everyone who added that repository.
+- **Not deployed.** There is no hosting, HTTPS termination, secrets management, backup or monitoring yet; the operator checklist is in [security.md](security.md). The web app and API must be deployed same-site.
+- **Web security headers** (CSP, frame ancestors) for the Next.js app are not configured; the API sends its own.
 - **Manual grammar step.** Tree-sitter grammars must be downloaded once with `ensure_grammars()`. The worker only warns if they are missing, and without them files are indexed as text and architecture analysis cannot read imports.
 - **Language coverage.** Structure-aware chunking and the import graph cover Python, JavaScript, TypeScript and TSX only. Dynamic imports and runtime wiring are not resolved. Architecture areas and technologies are heuristic and marked "Inferred".
 - **AI answers can be wrong.** Citations are checked against what was retrieved, but the claims in the text are not verified. Semantic retrieval needs a Gemini key and is subject to its quotas; otherwise keyword matching is used.
 - **Chat details.** An answer still streaming is lost if you leave the Ask AI tab. Conversation titles saved by earlier versions are not rewritten. A conversation is only created when the first question is sent.
 - **Graph layout.** A dense, fully cyclic dependency graph is laid out as one long chain that is tiny at "fit to view". Zoom, find and the details panel still work.
 - **Keyword-only retrieval.** Without embeddings, conceptual questions can miss the relevant code; exact identifiers work well.
-- **Test coverage.** The frontend tests cover pure logic (graph model, citations, titles, statistics). There are no automated component or end-to-end browser tests.
+- **Test coverage.** The frontend unit tests cover pure logic (graph model, citations, titles, statistics, sign-in helpers). Browser automation is limited to the 24-check smoke test; Ask AI, the architecture graph and error recovery were verified by hand in Milestone 1 and are not automated.
 - **Housekeeping.** `cmd.txt` and `step.txt` at the repository root are personal development notes that are tracked in Git. `agent/`, `mcp/`, `ingestion/`, `packages/` and `infrastructure/` contain only `.gitkeep` placeholders.
 
 ## What remains before deployment
 
-1. Confirm both GitHub Actions workflows pass on GitHub.
-2. Authentication and ownership (Phase 8): replace the default-user lookup (`find_default_user_id`), add sign-in, scope repositories and conversations per user, and remove the placeholder persona.
-3. Abuse and cost controls: per-user limits on imports, repository size, and AI requests.
-4. A deployment target for the API, the worker, PostgreSQL with pgvector, Redis and the web app, with migrations on release and grammars fetched at image build time.
-5. Production configuration: secrets management, allowed origins, HTTPS, logging and monitoring, database backups.
-6. A security and privacy review, and automated end-to-end tests of the main flows.
+1. Push the Phase 2 commits and confirm all three GitHub Actions workflows pass.
+2. Register a GitHub OAuth App (development first), perform and watch a real sign-in, then repeat with a production OAuth App.
+3. Choose a deployment target for the API, the worker, PostgreSQL with pgvector, Redis and the web app on one registrable domain; follow the operator checklist in [security.md](security.md) (HTTPS, secrets, `ENVIRONMENT=production`, `TRUSTED_PROXIES`, backups, migrations on release, grammars fetched at image build time).
+4. Import and index the showcase repositories, then list them in `GUEST_SHOWCASE_REPOSITORIES`.
+5. Set provider-side spend caps next to `AI_GLOBAL_DAILY_LIMIT`, and monitor 429/401/403 rates and queue depth.
+6. Optional hardening later: CAPTCHA or account-age checks, account deletion, web-app security headers, automated browser tests of Ask AI and the graph.
 
 Out of scope for this baseline, and not started: LangGraph, MCP, and autonomous code editing.

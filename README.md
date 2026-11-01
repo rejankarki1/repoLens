@@ -2,11 +2,13 @@
 
 repoLens is an AI-powered repository intelligence tool for public GitHub repositories. It ingests a repository, makes its code searchable, lets you ask questions that are answered from the code with citations to the exact files and lines, and maps how the modules depend on each other.
 
-> **Project status:** a working local application. It is not deployed, has no authentication, and is not production-ready. See [docs/release-baseline.md](docs/release-baseline.md) for what exists, what was verified, and what remains.
+> **Project status:** a working application with GitHub sign-in, per-user workspaces and usage limits. It is not deployed. Real GitHub OAuth has not yet been exercised end to end (tests use a fake GitHub), so treat it as unverified until you have configured an OAuth App. See [docs/release-baseline.md](docs/release-baseline.md) for what exists, what was verified, and what remains.
 
 ## What it does
 
-- **Ingestion.** Import a public GitHub repository by URL; a Redis/RQ worker downloads and indexes it in the background.
+- **Sign in with GitHub.** Identity only: no repository access is requested. Each user has a private workspace and private conversations; repository data (files, embeddings, architecture) is shared between users who analyze the same public repository.
+- **Guest showcase.** Visitors can browse an explicit allow-list of pre-indexed repositories read-only (overview, source, architecture); they cannot import, search, or ask questions.
+- **Ingestion.** Paste a public GitHub repository URL (signing in if needed, and your URL is kept through sign-in); a Redis/RQ worker downloads and indexes it in the background.
 - **Code Explorer.** Browse the file tree and source, with a dependency panel for each file.
 - **Ask AI.** Questions are answered by Gemini or Groq from retrieved code only, with clickable citations that open a source preview. Conversations are saved and can be renamed, deleted, or cleared.
 - **Hybrid retrieval.** PostgreSQL full-text search plus pgvector similarity over tree-sitter code chunks, with Gemini embeddings (optional; keyword search works without a key).
@@ -72,7 +74,9 @@ Run these commands from the repository root. You need Python 3.14, Node.js 22.18
 
    The example password is only for local development. If you change `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or the exposed ports in `.env`, update `DATABASE_URL` or `REDIS_URL` in the same file to match. Do not commit `.env`. API keys (`GEMINI_API_KEY`, `GROQ_API_KEY`, `GITHUB_TOKEN`) are optional and belong only in `.env`.
 
-2. Install API dependencies, apply migrations, and fetch the tree-sitter grammars:
+2. Create a GitHub OAuth App for sign-in (see [GitHub OAuth App setup](#github-oauth-app-setup)) and put its client id and secret in `.env`. Without them the app still starts and visitors can browse the showcase, but nobody can sign in or import.
+
+3. Install API dependencies, apply migrations, and fetch the tree-sitter grammars:
 
    ```bash
    python3 -m venv apps/api/venv
@@ -83,30 +87,32 @@ Run these commands from the repository root. You need Python 3.14, Node.js 22.18
 
    The grammar download needs the network and is done once; the parser never downloads grammars while it runs. Without it, files are indexed as plain text and architecture analysis cannot read imports. Use `requirements.txt` instead of `requirements-dev.txt` if you do not need the test tools.
 
-3. Start the API:
+4. Start the API:
 
    ```bash
    apps/api/venv/bin/uvicorn apps.api.main:app --reload --port 8765
    ```
 
-   Open `http://127.0.0.1:8765/docs`. `/health` checks that the API responds; `/health/ready` checks PostgreSQL and Redis and returns HTTP 503 if either is unavailable. PostgreSQL is exposed on port 5433 in `.env.example` because a local PostgreSQL server may already use 5432.
+   Open `http://localhost:8765/docs`. `/health` checks that the API responds; `/health/ready` checks PostgreSQL and Redis and returns HTTP 503 if either is unavailable. PostgreSQL is exposed on port 5433 in `.env.example` because a local PostgreSQL server may already use 5432.
 
-4. In a second terminal, start the background worker. Importing a repository needs it:
+5. In a second terminal, start the background worker. Importing a repository needs it:
 
    ```bash
    apps/api/venv/bin/python -m apps.api.worker
    ```
 
-5. In a third terminal, start the web app:
+6. In a third terminal, start the web app:
 
    ```bash
    cd apps/web
-   cp .env.example .env.local   # optional: the API URL defaults to http://127.0.0.1:8765
+   cp .env.example .env.local   # optional: the API URL defaults to http://localhost:8765
    npm ci
    npm run dev
    ```
 
-   Open `http://localhost:3000`, paste a public GitHub repository URL, and wait for it to finish ingesting.
+   Open `http://localhost:3000` (use `localhost`, not `127.0.0.1`: the session cookie needs the web app and the API on the same site). Paste a public GitHub repository URL, continue with GitHub, and wait for it to finish ingesting.
+
+   **Upgrading a database that predates sign-in?** Read [docs/auth-migration.md](docs/auth-migration.md) first: your old repositories and conversations are kept, and you take them over explicitly with `python -m apps.api.scripts.claim_local_data`.
 
 To stop local services without deleting their named volumes, run `docker compose down`. The Compose ports bind to `127.0.0.1` for local access only.
 
@@ -117,4 +123,35 @@ apps/api/venv/bin/python -m pytest -q           # backend; needs PostgreSQL with
 cd apps/web && npm test && npm run typecheck && npm run lint && npm run build
 ```
 
-The same checks run in GitHub Actions on every push and pull request to `main` (`.github/workflows/`). They use throwaway services and no AI or GitHub credentials.
+A browser smoke test (headless Chrome, a fake GitHub, its own database, Redis database and ports) covers sign-in, the guest showcase, the paste-URL flow and isolation between users:
+
+```bash
+python -m tests.e2e.run_smoke      # needs Chrome (or CHROME_BIN) and the web app's dependencies; never touches development data
+```
+
+The same checks run in GitHub Actions on every push and pull request to `main` (`.github/workflows/`). They use throwaway services and no AI, OAuth or GitHub credentials.
+
+## GitHub OAuth App setup
+
+RepoLens signs users in with a GitHub OAuth App. It asks for no scopes, so the token can read only public profile data (id, username, name, avatar); it is used once, revoked, and never stored.
+
+1. GitHub → Settings → Developer settings → OAuth Apps → **New OAuth App**.
+2. **Homepage URL**: your web app (`http://localhost:3000` locally).
+3. **Authorization callback URL**: the API's callback, exactly `<API_PUBLIC_URL>/auth/github/callback` (`http://localhost:8765/auth/github/callback` locally). GitHub only returns the browser to this URL.
+4. Create the app, then **Generate a new client secret**.
+5. Put the values in `.env` (never commit them, and never put them in `apps/web`): `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `API_PUBLIC_URL`, `WEB_BASE_URL`, `WEB_ORIGINS`. Use a separate OAuth App for production, with the production URLs.
+6. Restart the API. `GET /auth/me` now reports `github_login_enabled: true` and "Continue with GitHub" works.
+
+To let visitors browse some repositories without signing in, import them first, then list them in `GUEST_SHOWCASE_REPOSITORIES` (`owner/name`, comma separated). Nothing is public unless it is listed.
+
+## Who can do what
+
+| | Visitor (guest) | Signed in |
+| --- | --- | --- |
+| Showcase repositories: overview, source, architecture | read-only | read-only until added to your repositories |
+| Your own repositories | none | full use |
+| Paste a URL and analyze a public repository | asked to sign in; the URL is kept | yes (per-hour and concurrent import limits) |
+| Ask AI, conversations, search, re-analysis | no | yes, on repositories in your workspace (per-day, burst and shared-budget limits) |
+| Someone else's conversations or repositories | no | no |
+
+Limits are settings (`AI_*`, `IMPORT_*`, `GUEST_*`, `AUTH_*` in `.env.example`) enforced server-side in Redis. See [docs/auth-design.md](docs/auth-design.md) and [docs/security.md](docs/security.md).

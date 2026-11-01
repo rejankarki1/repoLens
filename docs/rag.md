@@ -36,6 +36,8 @@ Answer fields: `assistant_message`, `citations` (`id` is the `[S#]` marker in th
 
 Stream events: `retrieval` (sources and mode, sent first), `token` (`{"text"}`), then `done` (same payload as the non-streaming response) or `error` (`{"code","message","retry_after"}`).
 
+Authentication and limits: every endpoint above needs a signed-in repository member (401 / 403 / 404 as described in `docs/auth-design.md`), and writes need the CSRF token. Questions are limited per user per day and per minute and by a shared daily budget (429 with `Retry-After` and `X-RateLimit-Scope`); a question that produces no saved answer does not use the daily quota.
+
 HTTP errors: 404 unknown repository or conversation, 409 repository not ingested, 422 empty or over-long question, 429 rate limited (with `Retry-After`), 503 generation not configured or provider unavailable, 504 timeout, 502 other provider failures. Provider messages are never echoed.
 
 ## Conversation titles

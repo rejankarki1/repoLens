@@ -1,5 +1,7 @@
 # RepoLens — Entity Relationship Design
 
+> **Historical design document.** It was written before most of the current schema existed and has not been kept up to date: it predates the chunk, embedding, architecture and authentication tables. The source of truth is the Alembic migrations in `database/migrations/versions/` and the models in `apps/api/models/entities.py`. For the authentication tables (`sessions`, `user_repositories`, the extended `github_accounts`) and the nullable `users.email`, see [auth-design.md](auth-design.md) and [auth-migration.md](auth-migration.md). `user_repositories`, shown below as planned, now exists.
+
 Phase 2.3 design, kept in step with the approved SQLAlchemy models in `apps/api/models/entities.py`. The Alembic migration for the new tables and columns has **not** been generated or applied yet.
 
 Visual diagram: [erd.svg](erd.svg) (open in VS Code or a browser). The Mermaid blocks below show the same design as text.
