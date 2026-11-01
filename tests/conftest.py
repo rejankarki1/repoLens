@@ -1,5 +1,18 @@
 """Shared pytest fixtures for API tests."""
 
+# Isolate the test run from the development environment BEFORE anything reads the settings. The developer's `.env`
+# points at their real Redis (db 0) and the real `ingestion` queue; code under test that enqueues work (for example a
+# completed ingestion queuing embeddings when a Gemini key is set) must land in a dedicated Redis database and queue.
+import os
+from urllib.parse import urlsplit, urlunsplit
+
+from apps.api.config import Settings as _Settings
+
+_redis = urlsplit(os.environ.get("REDIS_URL") or _Settings().redis_url)
+os.environ["REDIS_URL"] = urlunsplit(_redis._replace(path="/15"))
+os.environ["INGESTION_QUEUE_NAME"] = "repolens-test-ingestion"
+os.environ["INGESTION_SWEEP_INTERVAL_SECONDS"] = "0"
+
 import asyncio
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
@@ -143,11 +156,18 @@ def _never_touch_the_development_database(_prepared_test_database: None) -> Iter
     reaches for it directly (for example a streamed answer being saved) must hit the disposable test database instead,
     so no test, however it is written, can add or change development data."""
     from apps.api.core import database
+    from redis import Redis
 
     test_engine = create_async_engine(_test_database_url())
     database.session_factory.configure(bind=test_engine)
     yield
     asyncio.run(test_engine.dispose())
+    try:  # the test Redis database (db 15) is ours alone: leave it empty
+        cleaner = Redis.from_url(get_settings().redis_url)
+        cleaner.flushdb()
+        cleaner.close()
+    except Exception:  # Redis may be down; nothing to clean then
+        pass
 
 
 @pytest.fixture
