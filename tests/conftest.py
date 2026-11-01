@@ -156,7 +156,7 @@ async def real_db_session(_prepared_test_database: None) -> AsyncIterator[AsyncS
 
 
 @pytest.fixture
-async def real_client(
+async def anon_client(
     real_db_session: AsyncSession, github_service: AsyncMock
 ) -> AsyncIterator[httpx.AsyncClient]:
     """An async client backed by the real, transactionally-isolated `repolens_test` database.
@@ -182,3 +182,9 @@ async def real_client(
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_github_service, None)
+
+
+@pytest.fixture
+async def real_client(anon_client: httpx.AsyncClient) -> httpx.AsyncClient:
+    """The client most tests use (a later change makes it a signed-in one)."""
+    return anon_client

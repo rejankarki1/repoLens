@@ -100,7 +100,48 @@ class Settings(BaseSettings):
     groq_reasoning_effort: str | None = None
     # Groq also uses the gemini_generation_timeout/deadline/temperature/max_output_tokens settings above.
 
+    # --- Authentication (see docs/auth-design.md). GitHub OAuth identifies users only: no scope, no repository access.
+    environment: Literal["development", "production"] = "development"  # env ENVIRONMENT
+    web_base_url: str = "http://localhost:3000"  # where the browser is sent after sign-in; must be one of web_origins
+    api_public_url: str = "http://localhost:8765"  # the API's own public URL, used for the OAuth callback
+    github_oauth_client_id: str | None = None
+    github_oauth_client_secret: SecretStr | None = None  # never logged or returned by the API
+    github_oauth_authorize_url: str = "https://github.com/login/oauth/authorize"
+    github_oauth_token_url: str = "https://github.com/login/oauth/access_token"
+    github_oauth_timeout_seconds: float = 10.0
+    oauth_state_ttl_seconds: int = 600
+    session_ttl_seconds: int = 14 * 24 * 3600  # absolute lifetime of a session
+    session_idle_seconds: int = 7 * 24 * 3600  # a session unused for this long is dead
+    session_cookie_secure: bool | None = None  # None: secure exactly when ENVIRONMENT=production
+    session_touch_seconds: int = 300  # last_seen_at is refreshed at most this often
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
+
+    @property
+    def cookie_secure(self) -> bool:
+        return self.is_production if self.session_cookie_secure is None else self.session_cookie_secure
+
+    @property
+    def session_cookie_name(self) -> str:
+        # The __Host- prefix makes browsers require Secure, Path=/ and no Domain, so a sibling subdomain cannot set it.
+        return "__Host-rl_session" if self.cookie_secure else "rl_session"
+
+    @property
+    def oauth_state_cookie_name(self) -> str:
+        return "__Host-rl_oauth" if self.cookie_secure else "rl_oauth"
+
+    @property
+    def github_oauth_redirect_uri(self) -> str:
+        return f"{self.api_public_url.rstrip('/')}/auth/github/callback"
+
+    @property
+    def github_login_enabled(self) -> bool:
+        secret = self.github_oauth_client_secret
+        return bool(self.github_oauth_client_id) and secret is not None and bool(secret.get_secret_value())
 
     @property
     def embeddings_enabled(self) -> bool:

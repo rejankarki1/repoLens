@@ -20,6 +20,7 @@ from apps.api.core.queue import get_queue
 from apps.api.core.redis import get_redis, redis_lifespan
 from apps.api.jobs.maintenance import sweeper_loop
 from apps.api.routes.architecture import router as architecture_router
+from apps.api.routes.auth import router as auth_router
 from apps.api.routes.conversations import router as conversations_router
 from apps.api.routes.files import router as files_router
 from apps.api.routes.ingestions import router as ingestions_router
@@ -57,6 +58,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(auth_router)
 app.include_router(repositories_router)
 app.include_router(ingestions_router)
 app.include_router(files_router)
