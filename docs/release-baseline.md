@@ -34,7 +34,7 @@ Run on 2026-11-01 on the development machine, and for the backend and frontend j
 
 | Check | Result |
 | --- | --- |
-| Backend tests (`pytest`) | **763 passed**, 2 warnings (third-party deprecation notices). 763 passed on clean Linux too. |
+| Backend tests (`pytest`) | **766 passed**, 2 warnings (third-party deprecation notices). 766 passed on clean Linux too. |
 | Frontend unit tests (`npm test`) | **49 passed**, 0 failed |
 | TypeScript (`tsc --noEmit`) | clean |
 | ESLint (`--max-warnings 0`) | 0 errors, 0 warnings |
@@ -43,7 +43,7 @@ Run on 2026-11-01 on the development machine, and for the backend and frontend j
 | Browser smoke test | **24 of 24 checks** (headless Chrome with real mouse and keyboard input; sign-in, guest showcase, paste-URL import, isolation between users, cancellation). Run locally against a **fake GitHub**; its GitHub Actions run has not happened yet. |
 | Workflow files | pass `actionlint` |
 
-The backend suite uses real PostgreSQL and real Redis (the limiter's atomicity is tested with 120 concurrent reservations against a limit of 20). It creates and drops its own `repolens_test` database, rebinds the application's session factory to it so no test can reach the development database, and makes no real network calls.
+The backend suite uses real PostgreSQL and real Redis (the limiter's atomicity is tested with 120 concurrent reservations against a limit of 20). It creates and drops its own `repolens_test` database, rebinds the application's session factory to it, and runs on Redis database 15 with its own queue name, so no test can reach the development database or the real job queue; it makes no real network calls.
 
 **Real GitHub OAuth is not verified.** No OAuth App credentials are configured, so no real GitHub login has been performed. Everything above used a mocked identity or a fake GitHub that enforces PKCE. The setup is in the README; the first real login should be watched.
 
