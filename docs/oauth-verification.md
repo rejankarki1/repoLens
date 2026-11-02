@@ -39,12 +39,13 @@ GITHUB_OAUTH_CLIENT_SECRET=
 GUEST_SHOWCASE_REPOSITORIES=pallets/itsdangerous
 GEMINI_API_KEY=
 GROQ_API_KEY=
+GITHUB_TOKEN=
 EOF
 chmod 600 .env.oauth-check
 git check-ignore -v .env.oauth-check      # must print a rule; if it prints nothing, stop
 ```
 
-Open the file in an editor and fill in `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET`. The AI keys are deliberately blank so this check cannot spend money; Ask AI is not part of it (it is covered elsewhere). Adjust the `DATABASE_URL` user and password if your `.env` uses different ones.
+Open the file in an editor and fill in `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET`. The AI provider keys (and `GITHUB_TOKEN`) are deliberately **blank**: an empty value in the file overrides both your normal `.env` and anything exported in your shell, so this check runs with no AI provider configured and cannot spend money. Ask AI is not part of it (it is covered elsewhere). In a real deployment you configure Gemini and Groq next to GitHub OAuth through the production secret store. Adjust the `DATABASE_URL` user and password if your `.env` uses different ones.
 
 ## 3. Load the settings and run the preflight
 
@@ -59,13 +60,17 @@ db = make_url(s.database_url)
 print("database :", db.host, db.database)
 print("redis db :", s.redis_url.rsplit("/", 1)[-1], "| queue:", s.ingestion_queue_name)
 print("oauth    :", "configured" if s.github_login_enabled else "NOT configured", "| callback:", s.github_oauth_redirect_uri)
-print("AI keys  :", "SET (unexpected)" if s.embeddings_enabled or (s.groq_api_key and s.groq_api_key.get_secret_value()) else "blank")
+ai = bool(s.groq_api_key and s.groq_api_key.get_secret_value()) or s.embeddings_enabled or bool(s.github_token)
+print("AI / token:", "SET (unexpected)" if ai else "unconfigured (as intended)")
 assert db.database == "repolens_oauth_check" and s.redis_url.endswith("/8") and s.ingestion_queue_name == "oauth_check", "NOT the isolated setup: stop here"
+secret = s.github_oauth_client_secret.get_secret_value() if s.github_oauth_client_secret else ""
+assert s.github_oauth_client_id and secret and not s.github_oauth_client_id.startswith("PASTE_") and not secret.startswith("PASTE_"), "the OAuth client id/secret are still empty or placeholders: edit .env.oauth-check"
+assert not ai, "an AI provider key or GitHub token is configured: .env.oauth-check was not loaded in this shell; stop here"
 print("OK: the isolated setup is in force")
 PY
 ```
 
-Expected: database `repolens_oauth_check`, redis db `8`, queue `oauth_check`, OAuth `configured`, callback `http://localhost:8765/auth/github/callback`, AI keys `blank`, then `OK`. Anything else: stop and fix `.env.oauth-check`. Run this check again in every new shell before any command below.
+Expected: database `repolens_oauth_check`, redis db `8`, queue `oauth_check`, OAuth `configured`, callback `http://localhost:8765/auth/github/callback`, `AI / token: unconfigured (as intended)`, then `OK`. Anything else: stop and fix `.env.oauth-check`. Run this check again in every new shell before any command below.
 
 ## 4. Create the database copy and migrate only the copy
 
