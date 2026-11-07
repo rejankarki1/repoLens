@@ -36,7 +36,7 @@ def _error_for(status: int, body: str, headers: httpx.Headers, model: str) -> Ge
     if status == 413:  # the request alone exceeds the model's tokens-per-minute limit
         return GenerationError(
             "bad_request",
-            "The question and code context are too large for this Groq model's limit; lower RAG_CONTEXT_MAX_CHARS",
+            "The prompt and context are larger than this Groq model allows for one request; reduce how much context is sent",
             status_code=413,
         )
     if status in (401, 403):

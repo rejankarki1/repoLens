@@ -55,6 +55,61 @@ class Settings(BaseSettings):
         """A queued/running analysis not touched for this long is treated as lost (its job cannot outlive the job timeout)."""
         return self.ingestion_job_timeout_seconds + 60
 
+    # --- Architecture Diagram V2 (see docs/architecture-diagram.md). An AI-identified functional-component
+    # graph on top of the deterministic graph above. Every limit below bounds what is sent to or accepted
+    # from the model; "bounded" means a generous, explicit cap, not an unbounded prompt — not "small".
+    architecture_diagram_context_max_chars: int = 45_000  # total size of the rendered context payload
+    architecture_diagram_max_modules: int = 40
+    architecture_diagram_max_module_edges: int = 80
+    architecture_diagram_max_entry_points: int = 30
+    architecture_diagram_max_technologies: int = 15
+    architecture_diagram_max_external_dependencies: int = 15
+    architecture_diagram_max_manifests: int = 6
+    architecture_diagram_readme_max_chars: int = 1_500
+    architecture_diagram_manifest_max_chars: int = 1_000
+    # Representative *code excerpts* (a named-symbol slice of a file's content): bounded breadth across
+    # modules, and within a module across its own immediate subdirectories (controllers/ vs models/ vs
+    # routes/, not just the module as a whole) before any one area gets a second file.
+    architecture_diagram_max_excerpt_files: int = 40
+    architecture_diagram_max_excerpts_per_bucket: int = 2
+    architecture_diagram_excerpt_max_chars_per_file: int = 600
+    # Per-module *file listing* (path + detected kind only, no content): the fix for a large module's files
+    # being invisible to the model beyond its 1-2 excerpted ones. Cheap — just strings — so capped generously.
+    architecture_diagram_max_files_per_module: int = 30
+    # File-level import references among the files already shown (see context.py's `file_references`):
+    # real, Tree-sitter-verified connections the module-level graph collapses when both files share a
+    # module. Source-grouped source -> [targets] pairs, so capped by how many *source* files get a line.
+    architecture_diagram_max_file_reference_sources: int = 120
+    architecture_diagram_max_targets_per_file_reference: int = 12
+    # Candidate components (see context.py's `candidate_components`): explicitly calls out individual files
+    # from a directory with several same-role siblings (controllers/, pages/, routes/ — the exact shape that
+    # collapses into one generic bucket otherwise), so the model treats each as a feature worth its own
+    # component unless the file-level edges show it is tightly coupled to a sibling. A bucket smaller than
+    # the minimum is a module too small to need this — its files are already visible via the module listing.
+    architecture_diagram_candidate_min_siblings: int = 3
+    # Files whose stored source is scanned for infrastructure SDK-usage lines (importers of packages + entry points).
+    architecture_diagram_max_infrastructure_scan_files: int = 80
+    architecture_diagram_max_candidates_per_bucket: int = 10
+    architecture_diagram_max_candidate_components: int = 60
+    # Caps on the *model's* output, enforced by validate.py regardless of what the model actually returns.
+    architecture_diagram_max_groups: int = 24
+    architecture_diagram_max_components: int = 90
+    architecture_diagram_max_relationships: int = 220
+    architecture_diagram_max_source_paths_per_component: int = 20
+    architecture_diagram_max_evidence_per_relationship: int = 3
+    # Diagram generation needs more output room than a chat answer; overrides gemini_generation_max_output_tokens
+    # for this one call (see services/architecture_diagram/generate.py), same provider/model/key otherwise.
+    architecture_diagram_max_output_tokens: int = 8_192
+    architecture_diagram_temperature: float = 0.15
+    architecture_diagram_hourly_limit: int = 10  # per user; mirrors architecture_hourly_limit's shape
+    # Overrides GENERATION_PROVIDER for diagram generation only (Ask AI keeps using GENERATION_PROVIDER as-is).
+    # None (default) means "same provider as Ask AI". Useful because a diagram prompt is much larger than a
+    # chat answer and may exceed a smaller model's per-request size limit even when that model is fine for Ask AI.
+    architecture_diagram_generation_provider: Literal["gemini", "groq"] | None = None  # env ARCHITECTURE_DIAGRAM_GENERATION_PROVIDER
+    # Unlike the deterministic analysis (no retry: same input always fails the same way), a diagram call
+    # can fail transiently (provider timeout, 5xx, rate limit), so it gets a short retry schedule.
+    architecture_diagram_retry_intervals_seconds: list[int] = [30, 120]
+
     # --- Semantic search (see docs/search.md). Embeddings are optional: without a key, search is keyword-only.
     gemini_api_key: SecretStr | None = None  # env GEMINI_API_KEY; never logged or returned by the API
     embedding_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
