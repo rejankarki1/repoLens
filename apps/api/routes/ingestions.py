@@ -93,7 +93,7 @@ async def create_ingestion(
         queued = True
     finally:
         if not queued:
-            await refund_import(limiter, access.user_id)
+            await refund_import(limiter, access.user_id, settings)
 
     return _status_response(await _get_repository_or_404(db, repository_id))
 

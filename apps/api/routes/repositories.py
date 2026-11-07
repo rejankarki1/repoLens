@@ -15,7 +15,7 @@ from apps.api.core.limits import get_limiter, guest_read_limit
 from apps.api.models.entities import Repository, UserRepository
 from apps.api.schemas.repository import RepositoryCreate, RepositoryResponse
 from apps.api.services.access import RepoAccess, add_member, is_member, read_access, showcase_names
-from apps.api.services.quota import check_repository_cap, reserve_import
+from apps.api.services.quota import check_repository_cap, check_total_repository_cap, reserve_import
 from apps.api.services.rate_limit import Limiter
 from apps.api.services.github import (
     GitHubRateLimitedError,
@@ -104,6 +104,7 @@ async def create_repository(
         return _with_access(known, "member")
 
     await check_repository_cap(db, settings, user_id)
+    await check_total_repository_cap(db, settings)
     await reserve_import(limiter, settings, user_id)  # counts the GitHub lookup too; never refunded for a failed lookup
     try:
         metadata = await github.get_repository_metadata(payload.github_url)

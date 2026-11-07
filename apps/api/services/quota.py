@@ -90,15 +90,30 @@ def shielded(awaitable) -> "asyncio.Future":
     return asyncio.shield(awaitable)
 
 
+IMPORT_GLOBAL_KEY = "import:global:day"
+
+
 async def reserve_import(limiter: Limiter, settings: Settings, user_id: int):
-    return await reserve_or_429(
+    result = await reserve_or_429(
         limiter, f"import:{user_id}", settings.import_hourly_limit, 3600,
         f"You have started {settings.import_hourly_limit} imports in the last hour.", "import",
     )
+    if settings.import_global_daily_limit > 0:  # all users together: bounds GitHub downloads and database growth
+        try:
+            await reserve_or_429(
+                limiter, IMPORT_GLOBAL_KEY, settings.import_global_daily_limit, DAY,
+                "RepoLens has reached its import limit for today.", "import_global",
+            )
+        except HTTPException:
+            await _quiet_refund(limiter, f"import:{user_id}")
+            raise
+    return result
 
 
-async def refund_import(limiter: Limiter, user_id: int) -> None:
+async def refund_import(limiter: Limiter, user_id: int, settings: Settings | None = None) -> None:
     await _quiet_refund(limiter, f"import:{user_id}")
+    if settings is not None and settings.import_global_daily_limit > 0:
+        await _quiet_refund(limiter, IMPORT_GLOBAL_KEY)
 
 
 async def reserve_hourly(limiter: Limiter, name: str, user_id: int, limit: int, message: str):
@@ -137,7 +152,19 @@ async def check_repository_cap(db: AsyncSession, settings: Settings, user_id: in
         raise HTTPException(status_code=403, detail=f"You have reached the limit of {settings.max_repositories_per_user} repositories")
 
 
+async def check_total_repository_cap(db: AsyncSession, settings: Settings) -> None:
+    """Hard ceiling on stored repositories across all users (0 disables it): keeps a small free database from filling up."""
+    if settings.max_total_repositories <= 0:
+        return
+    total = (await db.execute(select(func.count()).select_from(Repository))).scalar_one()
+    if total >= settings.max_total_repositories:
+        raise HTTPException(
+            status_code=403,
+            detail="This RepoLens demo has reached its repository capacity. Browse the existing repositories instead.",
+        )
+
+
 __all__ = [
     "AiReservation", "reserve_ai_question", "reserve_import", "refund_import", "reserve_hourly", "refund_hourly",
-    "check_import_concurrency", "check_repository_cap", "shielded", "wait_text",
+    "check_import_concurrency", "check_repository_cap", "check_total_repository_cap", "shielded", "wait_text",
 ]

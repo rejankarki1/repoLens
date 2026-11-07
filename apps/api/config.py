@@ -4,11 +4,34 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def normalize_database_url(url: str) -> str:
+    """Accept the URL as a hosted provider (Neon, Render, ...) prints it, and make it work with asyncpg.
+
+    `postgres://` and `postgresql://` get the `+asyncpg` driver, and libpq-only query options are translated or
+    dropped: `sslmode=require` becomes asyncpg's `ssl=require`; `channel_binding` (unsupported by asyncpg) is removed.
+    A URL that already names a driver is left alone apart from those options.
+    """
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    parts = urlsplit(url)
+    scheme = parts.scheme
+    if scheme in ("postgres", "postgresql"):
+        scheme = "postgresql+asyncpg"
+    if not scheme.startswith("postgresql+asyncpg"):
+        return url
+    query = []
+    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+        if key == "channel_binding":
+            continue
+        query.append(("ssl", value) if key == "sslmode" else (key, value))
+    return urlunsplit(parts._replace(scheme=scheme, query=urlencode(query)))
 
 
 class Settings(BaseSettings):
@@ -185,6 +208,10 @@ class Settings(BaseSettings):
     import_hourly_limit: int = 10  # new imports or re-ingestions per user per hour
     import_max_concurrent_per_user: int = 3  # queued or running ingestions among a user's repositories
     max_repositories_per_user: int = 50
+    # Deployment guards for a small free-tier host (0 disables each): new imports across ALL users per 24 h, and the
+    # most repositories stored in total. Both only apply to repositories not already stored; joining one is free.
+    import_global_daily_limit: int = 0
+    max_total_repositories: int = 0
     embedding_build_hourly_limit: int = 6  # paid embedding jobs a user may start per hour
     architecture_hourly_limit: int = 30
     guest_reads_per_minute: int = 120  # per client IP, for signed-out requests to the showcase
@@ -202,6 +229,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=(_PROJECT_ROOT / ".env", _PROJECT_ROOT / ".env.oauth-check"), extra="ignore"
     )
+
+    @field_validator("database_url")
+    @classmethod
+    def _asyncpg_url(cls, value: str) -> str:
+        return normalize_database_url(value)
 
     @property
     def is_production(self) -> bool:
