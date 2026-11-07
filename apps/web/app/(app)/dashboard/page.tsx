@@ -14,8 +14,7 @@ export default function DashboardPage() {
             Understand any codebase.
           </h1>
           <p className="max-w-2xl text-pretty leading-relaxed text-muted-foreground">
-            Import a GitHub repository to browse its source, map how modules depend on each other, and ask questions
-            answered with citations to the exact files and lines.
+            Explore GitHub repositories, understand their architecture, and ask AI questions with precise source citations.
           </p>
         </div>
         <RepositoryImportForm />
@@ -26,11 +25,11 @@ export default function DashboardPage() {
           <h2 id="recent-heading" className="text-sm font-medium">
             Recent repositories
           </h2>
-          <Link href="/repositories" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
-            View all
+          <Link href="/repositories" className="rounded text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40">
+            View all repositories
           </Link>
         </div>
-        <RepositoryList limit={6} />
+        <RepositoryList limit={4} variant="recent" />
       </section>
     </div>
   )

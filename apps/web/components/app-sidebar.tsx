@@ -39,7 +39,7 @@ function SidebarContents() {
               href={href}
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'flex h-8 items-center gap-2.5 rounded-md px-2.5 text-sm transition-colors',
+                'flex h-8 items-center gap-2.5 rounded-md px-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40',
                 active
                   ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
                   : 'text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground',

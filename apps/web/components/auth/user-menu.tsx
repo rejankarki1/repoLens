@@ -38,7 +38,7 @@ export function UserMenu() {
 
   const display = user.name || user.login
   return (
-    <div className="flex items-center gap-2.5 border-t border-sidebar-border p-3">
+    <div className="flex items-center gap-3 border-t border-sidebar-border px-3 py-3">
       {user.avatar_url ? (
         <Image src={user.avatar_url} alt="" width={32} height={32} unoptimized className="size-8 shrink-0 rounded-full bg-muted" />
       ) : (
@@ -46,13 +46,14 @@ export function UserMenu() {
           {user.login.slice(0, 2).toUpperCase()}
         </div>
       )}
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{display}</p>
-        <p className="truncate text-xs text-muted-foreground">@{user.login}</p>
+      <div className="min-w-0 flex-1 overflow-hidden">
+        <p className="truncate text-sm font-medium leading-5" title={display}>{display}</p>
+        <p className="truncate text-xs leading-4 text-muted-foreground">@{user.login}</p>
       </div>
       <Button
         variant="ghost"
         size="icon-sm"
+        className="shrink-0"
         aria-label="Sign out"
         title="Sign out"
         disabled={leaving}
