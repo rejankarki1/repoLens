@@ -37,6 +37,7 @@ def get_queue() -> Queue:
 INGESTION_JOB_FUNC = "apps.api.jobs.ingestion_job.ingest_repository_job"
 EMBEDDING_JOB_FUNC = "apps.api.jobs.embedding_job.embed_repository_job"
 ARCHITECTURE_JOB_FUNC = "apps.api.jobs.architecture_job.analyze_architecture_job"
+ARCHITECTURE_DIAGRAM_JOB_FUNC = "apps.api.jobs.architecture_diagram_job.generate_architecture_diagram_job"
 
 
 def _worker_is_alive(name: str | None, connection: Redis, max_age_seconds: float) -> bool:
@@ -121,4 +122,22 @@ def enqueue_architecture(queue: Queue, repository_id: int, settings: Settings | 
         repository_id,
         job_timeout=settings.ingestion_job_timeout_seconds,
         failure_ttl=settings.ingestion_failure_ttl_seconds,
+    )
+
+
+def enqueue_architecture_diagram(queue: Queue, repository_id: int, settings: Settings | None = None) -> Job:
+    """Queue an AI architecture diagram generation on the same queue and worker as ingestion.
+
+    Unlike `enqueue_architecture`, this retries: it calls a paid provider, which can fail transiently.
+    """
+    from apps.api.jobs.architecture_diagram_job import generate_architecture_diagram_job
+
+    settings = settings or get_settings()
+    intervals = settings.architecture_diagram_retry_intervals_seconds
+    return queue.enqueue(
+        generate_architecture_diagram_job,
+        repository_id,
+        job_timeout=settings.ingestion_job_timeout_seconds,
+        failure_ttl=settings.ingestion_failure_ttl_seconds,
+        retry=Retry(max=len(intervals), interval=intervals) if intervals else None,
     )

@@ -1,5 +1,7 @@
 """Usage limits through HTTP: AI questions, imports, background jobs, guests, sign-in traffic, client IPs."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -15,6 +17,7 @@ from apps.api.core.redis import get_redis
 from apps.api.main import app
 from apps.api.models.entities import Conversation, Repository, UserRepository
 from apps.api.services import github_oauth as oauth
+from apps.api.services.architecture import store as architecture_store
 from apps.api.services.embeddings import get_embedder
 from apps.api.services.generation import GenerationError, get_generator
 from apps.api.services.github import GitHubRepositoryMetadata
@@ -252,6 +255,25 @@ async def test_architecture_and_embedding_jobs_have_hourly_limits(limits, real_c
     assert second.status_code in (202, 429)
     third = await real_client.post(f"/repositories/{repo_id}/architecture?force=true")
     assert third.status_code == 429 and third.headers["X-RateLimit-Scope"] == "architecture"
+
+
+@asynccontextmanager
+async def _same_session(db: AsyncSession) -> AsyncIterator[AsyncSession]:
+    yield db
+
+
+async def test_architecture_diagram_jobs_have_their_own_hourly_limit(limits, real_client, real_db_session) -> None:
+    """Mirrors test_architecture_and_embedding_jobs_have_hourly_limits one layer up: the diagram route's
+    quota (architecture_diagram_hourly_limit) is separate from the deterministic route's (architecture_hourly_limit)."""
+    limits(architecture_diagram_hourly_limit=1, architecture_hourly_limit=10_000)
+    repo_id = await new_repository(real_db_session)
+    await ingest(real_db_session, repo_id)
+    assert await architecture_store.run_analysis(lambda: _same_session(real_db_session), repo_id) == "completed"
+    assert (await real_client.post(f"/repositories/{repo_id}/architecture-diagram")).status_code == 202
+    second = await real_client.post(f"/repositories/{repo_id}/architecture-diagram?force=true")
+    assert second.status_code in (202, 429)
+    third = await real_client.post(f"/repositories/{repo_id}/architecture-diagram?force=true")
+    assert third.status_code == 429 and third.headers["X-RateLimit-Scope"] == "architecture-diagram"
 
 
 # --- guests, sign-in traffic, client addresses ------------------------------------------------------------------

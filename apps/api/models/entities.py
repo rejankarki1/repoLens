@@ -279,3 +279,37 @@ class ArchitectureAnalysis(Base):
     analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)  # module-level (high-level) view
     detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)  # file-level graph
+
+
+class ArchitectureDiagramRecord(Base):
+    """The AI-identified functional-component diagram of a repository (Architecture Diagram V2): one row
+    per repository, same state machine as `ArchitectureAnalysis`.
+
+    Named `*Record` (not `ArchitectureDiagram`) because that name is already the Pydantic schema for the
+    sealed diagram itself (`schemas/architecture_diagram.py`) — this row's `diagram` column holds one.
+
+    A diagram depends on two things being current at once: its own `result_commit_sha`/`generator_version`
+    (this row), and the *deterministic* analysis it was built from (`source_analyzer_version`) — if either
+    is stale, the stored diagram is served flagged `stale` rather than silently mixed with newer data (see
+    `services/architecture_diagram/store.py`).
+    """
+
+    __tablename__ = "architecture_diagrams"
+    __table_args__ = (
+        UniqueConstraint("repository_id", name="uq_architecture_diagrams_repository"),
+        CheckConstraint("status IN ('queued', 'running', 'completed', 'failed')", name="valid_architecture_diagram_status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(20))
+    target_commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)  # commit the latest attempt targets
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    result_commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    generator_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_analyzer_version: Mapped[int | None] = mapped_column(Integer, nullable=True)  # architecture_analyses.analyzer_version this was built from
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)  # provider/model that produced the result, for diagnostics
+    diagram: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)  # the sealed ArchitectureDiagram

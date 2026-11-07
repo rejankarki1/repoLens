@@ -27,6 +27,7 @@ from apps.api.core.security import (
 )
 from apps.api.jobs.maintenance import sweeper_loop
 from apps.api.routes.architecture import router as architecture_router
+from apps.api.routes.architecture_diagram import router as architecture_diagram_router
 from apps.api.routes.auth import router as auth_router
 from apps.api.routes.conversations import router as conversations_router
 from apps.api.routes.files import router as files_router
@@ -78,6 +79,7 @@ app.include_router(files_router)
 app.include_router(search_router)
 app.include_router(conversations_router)
 app.include_router(architecture_router)
+app.include_router(architecture_diagram_router)
 
 app.add_middleware(UnhandledErrorMiddleware)
 app.add_middleware(SecurityHeadersMiddleware, settings=settings)
