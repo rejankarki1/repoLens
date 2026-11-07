@@ -1,0 +1,195 @@
+{
+  "groups": [
+    {
+      "id": "g1",
+      "label": "Backend",
+      "description": "Express API server, authentication, database models, image and map integrations"
+    },
+    {
+      "id": "g2",
+      "label": "Frontend",
+      "description": "React SPA built with Vite, routing, UI components and pages"
+    },
+    {
+      "id": "g3",
+      "label": "Shared Services",
+      "description": "Utility libraries used by both backend and frontend"
+    }
+  ],
+  "components": [
+    {
+      "id": "c_backend_api",
+      "group_id": "g1",
+      "label": "API Server",
+      "description": "Express routes handling CRUD for listings, bookings, reviews and user sessions",
+      "kind": "service",
+      "source_paths": ["backend/routes/api/index.js"]
+    },
+    {
+      "id": "c_backend_models",
+      "group_id": "g1",
+      "label": "Data Models",
+      "description": "Mongoose schemas for User, Listing, Booking and Review",
+      "kind": "database",
+      "source_paths": [
+        "backend/models/user.js",
+        "backend/models/listing.js",
+        "backend/models/booking.js",
+        "backend/models/review.js"
+      ]
+    },
+    {
+      "id": "c_auth",
+      "group_id": "g1",
+      "label": "Authentication",
+      "description": "Passport local & Google strategies, session handling with connect-mongo",
+      "kind": "library",
+      "source_paths": ["backend/package.json"]
+    },
+    {
+      "id": "c_image_upload",
+      "group_id": "g1",
+      "label": "Image Upload Service",
+      "description": "Cloudinary integration via multer-storage-cloudinary for listing images",
+      "kind": "external_service",
+      "source_paths": ["backend/package.json"]
+    },
+    {
+      "id": "c_map_service",
+      "group_id": "g1",
+      "label": "Map Service",
+      "description": "Mapbox SDK used to geocode listing locations and render maps",
+      "kind": "external_service",
+      "source_paths": ["backend/package.json"]
+    },
+    {
+      "id": "c_frontend_app",
+      "group_id": "g2",
+      "label": "React Application",
+      "description": "Root of the SPA, sets up routing, theme and context providers",
+      "kind": "ui",
+      "source_paths": ["client/src/main.jsx"]
+    },
+    {
+      "id": "c_pages",
+      "group_id": "g2",
+      "label": "Page Components",
+      "description": "Route‑level pages such as Dashboard, ListingDetails, etc.",
+      "kind": "page",
+      "source_paths": [
+        "client/src/pages/DashboardPage.jsx",
+        "client/src/pages/ListingDetailsPage.jsx"
+      ]
+    },
+    {
+      "id": "c_ui_components",
+      "group_id": "g2",
+      "label": "UI Components",
+      "description": "Reusable visual components like Navbar, SearchBar, cards, etc.",
+      "kind": "component",
+      "source_paths": [
+        "client/src/components/Navbar.jsx",
+        "client/src/components/SearchBar.jsx"
+      ]
+    },
+    {
+      "id": "c_context",
+      "group_id": "g2",
+      "label": "React Contexts",
+      "description": "AuthProvider and FlashProvider for global state and notifications",
+      "kind": "library",
+      "source_paths": [
+        "client/src/context/AuthContext.jsx",
+        "client/src/context/FlashContext.jsx"
+      ]
+    },
+    {
+      "id": "c_api_client",
+      "group_id": "g3",
+      "label": "API Client Service",
+      "description": "Utility functions (apiFetch) for making authenticated HTTP calls to the backend",
+      "kind": "library",
+      "source_paths": ["client/src/services/api.js"]
+    },
+    {
+      "id": "c_constants",
+      "group_id": "g3",
+      "label": "Constants",
+      "description": "Static data such as listing categories",
+      "kind": "library",
+      "source_paths": ["client/src/constants/listingCategories.js"]
+    }
+  ],
+  "relationships": [
+    {
+      "id": "r1",
+      "source": "c_frontend_app",
+      "target": "c_context",
+      "label": "provides",
+      "kind": "imports"
+    },
+    {
+      "id": "r2",
+      "source": "c_frontend_app",
+      "target": "c_ui_components",
+      "label": "renders",
+      "kind": "renders"
+    },
+    {
+      "id": "r3",
+      "source": "c_pages",
+      "target": "c_ui_components",
+      "label": "uses",
+      "kind": "imports"
+    },
+    {
+      "id": "r4",
+      "source": "c_pages",
+      "target": "c_api_client",
+      "label": "calls",
+      "kind": "async_call"
+    },
+    {
+      "id": "r5",
+      "source": "c_ui_components",
+      "target": "c_api_client",
+      "label": "calls",
+      "kind": "async_call"
+    },
+    {
+      "id": "r6",
+      "source": "c_api_client",
+      "target": "c_backend_api",
+      "label": "requests",
+      "kind": "async_call"
+    },
+    {
+      "id": "r7",
+      "source": "c_backend_api",
+      "target": "c_backend_models",
+      "label": "reads/writes",
+      "kind": "db_read"
+    },
+    {
+      "id": "r8",
+      "source": "c_backend_api",
+      "target": "c_auth",
+      "label": "authenticates",
+      "kind": "imports"
+    },
+    {
+      "id": "r9",
+      "source": "c_backend_api",
+      "target": "c_image_upload",
+      "label": "uploads images",
+      "kind": "async_call"
+    },
+    {
+      "id": "r10",
+      "source": "c_backend_api",
+      "target": "c_map_service",
+      "label": "geocodes locations",
+      "kind": "async_call"
+    }
+  ]
+}

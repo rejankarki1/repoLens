@@ -1,0 +1,275 @@
+{
+  "components": [
+    {
+      "description": "Express routes handling CRUD for listings, bookings, reviews and user sessions",
+      "evidence_basis": "verified_paths",
+      "group_id": "g1",
+      "id": "c_backend_api",
+      "kind": "service",
+      "label": "API Server",
+      "source_paths": [
+        "backend/routes/api/index.js"
+      ]
+    },
+    {
+      "description": "Mongoose schemas for User, Listing, Booking and Review",
+      "evidence_basis": "verified_paths",
+      "group_id": "g1",
+      "id": "c_backend_models",
+      "kind": "database",
+      "label": "Data Models",
+      "source_paths": [
+        "backend/models/user.js",
+        "backend/models/listing.js",
+        "backend/models/booking.js",
+        "backend/models/review.js"
+      ]
+    },
+    {
+      "description": "Passport local & Google strategies, session handling with connect-mongo",
+      "evidence_basis": "verified_paths",
+      "group_id": "g1",
+      "id": "c_auth",
+      "kind": "library",
+      "label": "Authentication",
+      "source_paths": [
+        "backend/package.json"
+      ]
+    },
+    {
+      "description": "Cloudinary integration via multer-storage-cloudinary for listing images",
+      "evidence_basis": "verified_paths",
+      "group_id": "g1",
+      "id": "c_image_upload",
+      "kind": "external_service",
+      "label": "Image Upload Service",
+      "source_paths": [
+        "backend/package.json"
+      ]
+    },
+    {
+      "description": "Mapbox SDK used to geocode listing locations and render maps",
+      "evidence_basis": "verified_paths",
+      "group_id": "g1",
+      "id": "c_map_service",
+      "kind": "external_service",
+      "label": "Map Service",
+      "source_paths": [
+        "backend/package.json"
+      ]
+    },
+    {
+      "description": "Root of the SPA, sets up routing, theme and context providers",
+      "evidence_basis": "verified_paths",
+      "group_id": "g2",
+      "id": "c_frontend_app",
+      "kind": "ui",
+      "label": "React Application",
+      "source_paths": [
+        "client/src/main.jsx"
+      ]
+    },
+    {
+      "description": "Route\u2011level pages such as Dashboard, ListingDetails, etc.",
+      "evidence_basis": "verified_paths",
+      "group_id": "g2",
+      "id": "c_pages",
+      "kind": "page",
+      "label": "Page Components",
+      "source_paths": [
+        "client/src/pages/DashboardPage.jsx",
+        "client/src/pages/ListingDetailsPage.jsx"
+      ]
+    },
+    {
+      "description": "Reusable visual components like Navbar, SearchBar, cards, etc.",
+      "evidence_basis": "verified_paths",
+      "group_id": "g2",
+      "id": "c_ui_components",
+      "kind": "ui",
+      "label": "UI Components",
+      "source_paths": [
+        "client/src/components/Navbar.jsx",
+        "client/src/components/SearchBar.jsx"
+      ]
+    },
+    {
+      "description": "AuthProvider and FlashProvider for global state and notifications",
+      "evidence_basis": "verified_paths",
+      "group_id": "g2",
+      "id": "c_context",
+      "kind": "library",
+      "label": "React Contexts",
+      "source_paths": [
+        "client/src/context/AuthContext.jsx",
+        "client/src/context/FlashContext.jsx"
+      ]
+    },
+    {
+      "description": "Utility functions (apiFetch) for making authenticated HTTP calls to the backend",
+      "evidence_basis": "verified_paths",
+      "group_id": "g3",
+      "id": "c_api_client",
+      "kind": "library",
+      "label": "API Client Service",
+      "source_paths": [
+        "client/src/services/api.js"
+      ]
+    },
+    {
+      "description": "Static data such as listing categories",
+      "evidence_basis": "verified_paths",
+      "group_id": "g3",
+      "id": "c_constants",
+      "kind": "library",
+      "label": "Constants",
+      "source_paths": [
+        "client/src/constants/listingCategories.js"
+      ]
+    }
+  ],
+  "generator_version": 1,
+  "groups": [
+    {
+      "description": "Express API server, authentication, database models, image and map integrations",
+      "id": "g1",
+      "label": "Backend"
+    },
+    {
+      "description": "React SPA built with Vite, routing, UI components and pages",
+      "id": "g2",
+      "label": "Frontend"
+    },
+    {
+      "description": "Utility libraries used by both backend and frontend",
+      "id": "g3",
+      "label": "Shared Services"
+    }
+  ],
+  "relationships": [
+    {
+      "confidence": "verified",
+      "evidence": [
+        {
+          "detail": "import { AuthProvider } from \"./context/AuthContext.jsx\";",
+          "end_line": 8,
+          "path": "client/src/main.jsx",
+          "start_line": 8
+        },
+        {
+          "detail": "import { FlashProvider } from \"./context/FlashContext.jsx\";",
+          "end_line": 9,
+          "path": "client/src/main.jsx",
+          "start_line": 9
+        }
+      ],
+      "id": "r1",
+      "kind": "imports",
+      "label": "provides",
+      "source": "c_frontend_app",
+      "target": "c_context"
+    },
+    {
+      "confidence": "inferred",
+      "evidence": [],
+      "id": "r2",
+      "kind": "renders",
+      "label": "renders",
+      "source": "c_frontend_app",
+      "target": "c_ui_components"
+    },
+    {
+      "confidence": "verified",
+      "evidence": [
+        {
+          "detail": "import ListingCard from \"../components/ListingCard.jsx\";",
+          "end_line": 24,
+          "path": "client/src/pages/DashboardPage.jsx",
+          "start_line": 24
+        },
+        {
+          "detail": "import ListingForm from \"../components/ListingForm.jsx\";",
+          "end_line": 4,
+          "path": "client/src/pages/EditListingPage.jsx",
+          "start_line": 4
+        },
+        {
+          "detail": "import ReviewForm from \"../components/ReviewForm.jsx\";",
+          "end_line": 30,
+          "path": "client/src/pages/ListingDetailsPage.jsx",
+          "start_line": 30
+        }
+      ],
+      "id": "r3",
+      "kind": "imports",
+      "label": "uses",
+      "source": "c_pages",
+      "target": "c_ui_components"
+    },
+    {
+      "confidence": "inferred",
+      "evidence": [],
+      "id": "r4",
+      "kind": "async_call",
+      "label": "calls",
+      "source": "c_pages",
+      "target": "c_api_client"
+    },
+    {
+      "confidence": "inferred",
+      "evidence": [],
+      "id": "r5",
+      "kind": "async_call",
+      "label": "calls",
+      "source": "c_ui_components",
+      "target": "c_api_client"
+    },
+    {
+      "confidence": "inferred",
+      "evidence": [],
+      "id": "r6",
+      "kind": "async_call",
+      "label": "requests",
+      "source": "c_api_client",
+      "target": "c_backend_api"
+    },
+    {
+      "confidence": "inferred",
+      "evidence": [],
+      "id": "r7",
+      "kind": "db_read",
+      "label": "reads/writes",
+      "source": "c_backend_api",
+      "target": "c_backend_models"
+    },
+    {
+      "confidence": "inferred",
+      "evidence": [],
+      "id": "r8",
+      "kind": "imports",
+      "label": "authenticates",
+      "source": "c_backend_api",
+      "target": "c_auth"
+    },
+    {
+      "confidence": "inferred",
+      "evidence": [],
+      "id": "r9",
+      "kind": "async_call",
+      "label": "uploads images",
+      "source": "c_backend_api",
+      "target": "c_image_upload"
+    },
+    {
+      "confidence": "inferred",
+      "evidence": [],
+      "id": "r10",
+      "kind": "async_call",
+      "label": "geocodes locations",
+      "source": "c_backend_api",
+      "target": "c_map_service"
+    }
+  ],
+  "repository_commit_sha": "46857566500ed74764d00a6d5d1a9a71706e16ef",
+  "warnings": []
+}
