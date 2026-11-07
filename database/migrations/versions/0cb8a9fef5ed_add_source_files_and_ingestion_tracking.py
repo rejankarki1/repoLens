@@ -58,3 +58,4 @@ def downgrade() -> None:
     op.drop_column('repositories', 'last_ingested_commit_sha')
     op.drop_table('source_files')
     # ### end Alembic commands ###
+
