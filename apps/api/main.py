@@ -19,7 +19,12 @@ from apps.api.core.database import engine, get_db, session_factory
 from apps.api.core.queue import get_queue
 from apps.api.core.limits import SCOPE_HEADER
 from apps.api.core.redis import get_redis, redis_lifespan
-from apps.api.core.security import SecurityHeadersMiddleware, install_log_redaction, validate_production_settings
+from apps.api.core.security import (
+    SecurityHeadersMiddleware,
+    UnhandledErrorMiddleware,
+    install_log_redaction,
+    validate_production_settings,
+)
 from apps.api.jobs.maintenance import sweeper_loop
 from apps.api.routes.architecture import router as architecture_router
 from apps.api.routes.auth import router as auth_router
@@ -74,6 +79,7 @@ app.include_router(search_router)
 app.include_router(conversations_router)
 app.include_router(architecture_router)
 
+app.add_middleware(UnhandledErrorMiddleware)
 app.add_middleware(SecurityHeadersMiddleware, settings=settings)
 app.add_middleware(
     CORSMiddleware,

@@ -3,6 +3,7 @@
 import logging
 import re
 
+from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from apps.api.config import Settings
@@ -31,6 +32,46 @@ def install_log_redaction() -> None:
         logger = logging.getLogger(name)
         if not any(isinstance(f, RedactingFilter) for f in logger.filters):
             logger.addFilter(RedactingFilter())
+
+
+logger = logging.getLogger(__name__)
+
+
+class UnhandledErrorMiddleware:
+    """Converts a truly unhandled exception (a bug, a missing migration, ...) into a clean JSON 500 *before*
+    Starlette's default `ServerErrorMiddleware` would. That default handler sits outside `CORSMiddleware`
+    (and `app.exception_handler(Exception)` is routed there too — see `Starlette.build_middleware_stack`,
+    which special-cases `Exception`/500 to the outer middleware, not the inner `ExceptionMiddleware` CORS
+    wraps), so its response carries no CORS headers: the browser blocks it from JS and `fetch()` throws a
+    generic network error instead of resolving, and the frontend reports "could not reach the API" for what
+    is actually a real backend failure. This middleware must be registered *before* `CORSMiddleware` (so it
+    ends up inside it — see `app.add_middleware`'s doc) so its response passes back through CORS's normal
+    header injection like any other response.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        response_started = False
+
+        async def tracking_send(message: Message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception:
+            logger.exception("Unhandled error on %s %s", scope.get("method"), scope.get("path"))
+            if response_started:  # headers already sent: too late to send a different response
+                raise
+            response = JSONResponse(status_code=500, content={"detail": "Internal server error"})
+            await response(scope, receive, send)
 
 
 class SecurityHeadersMiddleware:

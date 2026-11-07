@@ -4,11 +4,13 @@ import logging
 import os
 import subprocess
 import sys
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import get_settings
 from apps.api.core.database import get_db
@@ -90,6 +92,28 @@ async def test_cors_allows_only_configured_origins_with_credentials(anon_client:
     simple = await anon_client.get("/repositories", headers={"Origin": allowed})
     exposed = simple.headers.get("access-control-expose-headers", "").lower()
     assert "retry-after" in exposed and "x-ratelimit-scope" in exposed  # the web app needs these to explain a 429
+
+
+async def test_an_unhandled_exception_still_carries_cors_headers(anon_client: httpx.AsyncClient) -> None:
+    """Starlette's default `ServerErrorMiddleware` sits outside `CORSMiddleware` (and `Exception`/500
+    exception handlers are routed there too — see `Starlette.build_middleware_stack`), so a truly unhandled
+    exception's 500 would otherwise carry no CORS headers: the browser blocks it, and `fetch()` throws a
+    generic network error instead of surfacing the real failure (what actually happened when a repository's
+    diagram table was missing). `UnhandledErrorMiddleware` (registered before `CORSMiddleware` in
+    `main.py`, so it ends up inside it) must keep catching this so it can never regress silently."""
+    async def boom() -> AsyncIterator[AsyncSession]:
+        raise RuntimeError("simulated unhandled failure")
+        yield  # pragma: no cover - makes this an async generator, matching get_db's shape
+
+    app.dependency_overrides[get_db] = boom
+    try:
+        allowed = get_settings().allowed_origins[0]
+        response = await anon_client.get("/repositories", headers={"Origin": allowed})
+        assert response.status_code == 500
+        assert response.headers.get("access-control-allow-origin") == allowed
+        assert response.json() == {"detail": "Internal server error"}
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 # --- production configuration ------------------------------------------------------------------------------------
