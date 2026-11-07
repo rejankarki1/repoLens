@@ -1,10 +1,14 @@
 """Environment-based configuration for the API."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -136,7 +140,13 @@ class Settings(BaseSettings):
     # Repositories (owner/name, comma separated) that signed-out visitors may browse read-only. Nothing is public unless listed.
     guest_showcase_repositories: str = ""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Two layers, the later file wins: `.env` is the shared base (AI keys, models, Docker ports); `.env.oauth-check`, when it
+    # exists, overrides only what differs for the isolated OAuth-check setup (database, Redis db, queue, GitHub OAuth app,
+    # URLs). A file that does not exist is skipped, so CI and fresh clones read `.env` alone. Variables exported in the
+    # shell still beat both files. Absolute paths: the same result whatever directory a process starts in.
+    model_config = SettingsConfigDict(
+        env_file=(_PROJECT_ROOT / ".env", _PROJECT_ROOT / ".env.oauth-check"), extra="ignore"
+    )
 
     @property
     def is_production(self) -> bool:

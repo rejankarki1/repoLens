@@ -4,6 +4,8 @@ A manual procedure to prove that sign-in works with a real GitHub OAuth App, wit
 
 **Status of this procedure: not yet performed.** It needs an OAuth App you create. Nothing here runs automatically.
 
+> **Note.** The app now reads `.env` and then `.env.oauth-check` by itself (`apps/api/config.py`), so the plain commands (`uvicorn`, `python -m apps.api.worker`, `npm run dev`) use the isolated setup with no `source` or `export`. The AI keys come from `.env`, so they no longer need to be blank in this file, and the preflight below that insists on "unconfigured" applies only to the older, hand-sourced procedure. The database copy in step 4 is still made by hand, once.
+
 ## Rules that keep it safe
 
 - Work on a **copy** of the development database (`repolens_oauth_check`), **Redis database 8** and the **queue `oauth_check`**. Your real database, Redis database 0 and the `ingestion` queue are never used, so your real worker cannot pick up these jobs.

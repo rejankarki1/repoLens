@@ -74,7 +74,7 @@ Run these commands from the repository root. You need Python 3.14, Node.js 22.18
 
    The example password is only for local development. If you change `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or the exposed ports in `.env`, update `DATABASE_URL` or `REDIS_URL` in the same file to match. Do not commit `.env`. API keys (`GEMINI_API_KEY`, `GROQ_API_KEY`, `GITHUB_TOKEN`) are optional and belong only in `.env`.
 
-2. Create a GitHub OAuth App for sign-in (see [GitHub OAuth App setup](#github-oauth-app-setup)) and put its client id and secret in `.env`. Without them the app still starts and visitors can browse the showcase, but nobody can sign in or import.
+2. Create a GitHub OAuth App for sign-in (see [GitHub OAuth App setup](#github-oauth-app-setup)), copy `.env.oauth-check.example` to `.env.oauth-check`, `chmod 600` it, and put the client id and secret there (see [Start and stop](#start-and-stop)). Without them the app still starts and visitors can browse the showcase, but nobody can sign in or import.
 
 3. Install API dependencies, apply migrations, and fetch the tree-sitter grammars:
 
@@ -87,34 +87,33 @@ Run these commands from the repository root. You need Python 3.14, Node.js 22.18
 
    The grammar download needs the network and is done once; the parser never downloads grammars while it runs. Without it, files are indexed as plain text and architecture analysis cannot read imports. Use `requirements.txt` instead of `requirements-dev.txt` if you do not need the test tools.
 
-4. Start the API:
-
-   ```bash
-   apps/api/venv/bin/uvicorn apps.api.main:app --reload --port 8765
-   ```
-
-   Open `http://localhost:8765/docs`. `/health` checks that the API responds; `/health/ready` checks PostgreSQL and Redis and returns HTTP 503 if either is unavailable. PostgreSQL is exposed on port 5433 in `.env.example` because a local PostgreSQL server may already use 5432.
-
-5. In a second terminal, start the background worker. Importing a repository needs it:
-
-   ```bash
-   apps/api/venv/bin/python -m apps.api.worker
-   ```
-
-6. In a third terminal, start the web app:
-
-   ```bash
-   cd apps/web
-   cp .env.example .env.local   # optional: the API URL defaults to http://localhost:8765
-   npm ci
-   npm run dev
-   ```
-
-   Open `http://localhost:3000` (use `localhost`, not `127.0.0.1`: the session cookie needs the web app and the API on the same site). Paste a public GitHub repository URL, continue with GitHub, and wait for it to finish ingesting.
-
    **Upgrading a database that predates sign-in?** Read [docs/auth-migration.md](docs/auth-migration.md) first: your old repositories and conversations are kept, and you take them over explicitly with `python -m apps.api.scripts.claim_local_data`.
 
-To stop local services without deleting their named volumes, run `docker compose down`. The Compose ports bind to `127.0.0.1` for local access only.
+4. Install the web app's dependencies once: `cd apps/web && npm ci`.
+
+## Start and stop
+
+Run each service in its own terminal, from the repository root (the web app from `apps/web`):
+
+```bash
+docker compose up -d                                              # PostgreSQL + Redis
+apps/api/venv/bin/uvicorn apps.api.main:app --reload --port 8765  # FastAPI
+apps/api/venv/bin/python -m apps.api.worker                       # RQ worker
+cd apps/web && npm run dev                                        # Next.js
+```
+
+Open `http://localhost:3000` (use `localhost`, not `127.0.0.1`: the session cookie needs the web app and the API on the same site). `http://localhost:8765/docs` is the API documentation and `/health/ready` reports PostgreSQL and Redis. Stop a process with Ctrl-C; stop the containers with `docker compose stop` (never `docker compose down -v`, which deletes the data).
+
+**Configuration: two files, read automatically.** The API, the worker and Alembic all read `apps/api/config.py`, which loads `.env` and then `.env.oauth-check` (the later file wins; a file that does not exist is skipped). Nothing needs to be exported or sourced.
+
+| File | Holds | Git |
+| --- | --- | --- |
+| `.env` | the shared base: Docker ports, `GEMINI_API_KEY`, `GROQ_API_KEY`, `GENERATION_PROVIDER`, models, and the default (development) `DATABASE_URL` / `REDIS_URL` | ignored |
+| `.env.oauth-check` | only what differs for the isolated OAuth-check setup: `DATABASE_URL` (`repolens_oauth_check`), `REDIS_URL` (database 8), `INGESTION_QUEUE_NAME=oauth_check`, the GitHub OAuth App id and secret, and the `localhost` URLs | ignored (template: `.env.oauth-check.example`) |
+
+So while `.env.oauth-check` exists, every plain command uses the isolated database, Redis database 8 and the `oauth_check` queue, and the AI keys come from `.env`. To work against your real development resources, move `.env.oauth-check` aside. Put AI keys in `.env` only. A variable exported in your shell still beats both files, so if the wrong database or queue appears, check `env | grep -E 'DATABASE_URL|REDIS_URL|INGESTION|GEMINI|GROQ|GITHUB'` and `unset` the stray ones.
+
+Do not use the `oauth-check` overlay in production: set the real values through the production secret store (see `docs/security.md`).
 
 ## Tests
 
@@ -141,7 +140,7 @@ RepoLens signs users in with a GitHub OAuth App. It asks for no scopes, so the t
 2. **Homepage URL**: your web app (`http://localhost:3000` locally).
 3. **Authorization callback URL**: the API's callback, exactly `<API_PUBLIC_URL>/auth/github/callback` (`http://localhost:8765/auth/github/callback` locally). GitHub only returns the browser to this URL.
 4. Create the app, then **Generate a new client secret**.
-5. Put the values in `.env` (never commit them, and never put them in `apps/web`): `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `API_PUBLIC_URL`, `WEB_BASE_URL`, `WEB_ORIGINS`. Use a separate OAuth App for production, with the production URLs.
+5. Put the values in `.env.oauth-check` locally (the app reads it after `.env`), or in the production secret store when deployed. Never commit them, and never put them in `apps/web`: `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `API_PUBLIC_URL`, `WEB_BASE_URL`, `WEB_ORIGINS`. Use a separate OAuth App for production, with the production URLs.
 6. Restart the API. `GET /auth/me` now reports `github_login_enabled: true` and "Continue with GitHub" works.
 
 To let visitors browse some repositories without signing in, import them first, then list them in `GUEST_SHOWCASE_REPOSITORIES` (`owner/name`, comma separated). Nothing is public unless it is listed.
