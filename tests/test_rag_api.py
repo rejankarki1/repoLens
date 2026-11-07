@@ -535,3 +535,82 @@ async def test_deleting_a_conversation_during_an_answer_is_a_clean_404(api: dict
     api["generator"].generate = gone
     response = await ask(api, repo_id, conv_id, "How does hash_password work?")
     assert response.status_code == 404 and await message_count(api) == 0
+
+
+# --- file-name grounding -----------------------------------------------------------------------------------------------
+
+
+def _excerpt(label: str, path: str, content: str, start: int = 1, end: int = 9) -> rag.Source:
+    from types import SimpleNamespace
+
+    return rag.Source(label, SimpleNamespace(
+        chunk_id=int(label[1:]), source_file_id=int(label[1:]) + 100, path=path, language="javascript", kind="module",
+        symbol_name=None, start_line=start, end_line=end, start_byte=0, end_byte=len(content), commit_sha=SHA_A,
+        content=content,
+    ))
+
+
+def _file_warnings(final: rag.FinalAnswer) -> list[str]:
+    return [w for w in final.warnings if "not among the retrieved sources" in w]
+
+
+SERVER = _excerpt("S1", "backend/server.js", 'const { connectDB } = require("./config/db");\nconnectDB();', 1, 24)
+README = _excerpt("S2", "README.md", "Open index.html in the client folder and set ATLASDB_URL.", 39, 106)
+
+
+def test_directly_retrieved_files_are_supported_and_cited_with_exact_ranges() -> None:
+    final = rag.finalize_answer("The server starts in backend/server.js [S1] and README.md [S2].", [SERVER, README])
+    assert _file_warnings(final) == [] and not any("cites no retrieved source" in w for w in final.warnings)
+    assert [(c["id"], c["path"], c["start_line"], c["end_line"]) for c in final.citations] == [
+        ("S1", "backend/server.js", 1, 24), ("S2", "README.md", 39, 106),
+    ]
+
+
+def test_basename_of_a_retrieved_path_is_supported() -> None:
+    assert _file_warnings(rag.finalize_answer("`server.js` boots the app [S1].", [SERVER])) == []
+
+
+def test_file_named_only_inside_a_retrieved_excerpt_is_supported_as_a_reference() -> None:
+    final = rag.finalize_answer("The README points to index.html [S2].", [SERVER, README])
+    assert _file_warnings(final) == []
+    assert [c["path"] for c in final.citations] == ["README.md"]  # never cited as if its own content was retrieved
+    assert _file_warnings(rag.finalize_answer("See client/index.html [S2].", [README])) == []
+
+
+def test_file_that_is_only_implied_by_an_import_still_warns() -> None:
+    final = rag.finalize_answer("`connectDB` lives in backend/config/db.js [S1].", [SERVER, README])
+    assert _file_warnings(final) and "backend/config/db.js" in _file_warnings(final)[0]
+    assert "index.html" not in _file_warnings(final)[0]
+
+
+def test_unsupported_file_names_still_warn_and_mix_with_supported_ones() -> None:
+    final = rag.finalize_answer("Uses backend/server.js [S1], index.html [S2] and routes/made_up.py.", [SERVER, README])
+    [warning] = _file_warnings(final)
+    assert "routes/made_up.py" in warning and "server.js" not in warning and "index.html" not in warning
+
+
+def test_hypothetical_file_names_in_a_no_evidence_answer_are_flagged() -> None:
+    answer = "The excerpts contain no Stripe code. You could look for a `payments.js` or `stripe.js` file."
+    [warning] = _file_warnings(rag.finalize_answer(answer, [SERVER, README]))
+    assert "payments.js" in warning and "stripe.js" in warning
+
+
+def test_a_general_no_evidence_answer_raises_no_file_warning() -> None:
+    answer = "The retrieved excerpts contain no payment-handling code, so I can't say how Stripe is used."
+    final = rag.finalize_answer(answer, [SERVER, README])
+    assert final.warnings == ["The answer cites no retrieved source; treat it as unverified"] and final.citations == []
+
+
+def test_invalid_markers_are_still_dropped_next_to_supported_files() -> None:
+    final = rag.finalize_answer("See backend/server.js [S1][S9].", [SERVER])
+    assert [c["id"] for c in final.citations] == ["S1"] and "S9" not in final.text
+    assert any("S9" in w for w in final.warnings) and _file_warnings(final) == []
+
+
+async def test_system_prompt_forbids_inventing_file_names(api: dict) -> None:
+    repo_id, conv_id = await setup_repo(api)
+    await ask(api, repo_id, conv_id, "How does hash_password work?")
+    system = api["generator"].calls[0]["system"]
+    assert "describe what is missing in general terms" in system
+    assert "Never invent, guess or suggest file names" in system
+    assert "describe a file's contents only if an excerpt from that file itself was supplied" in system
