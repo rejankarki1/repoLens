@@ -1,0 +1,65 @@
+# Render Blueprint: ONE free web service running the API and its single RQ worker (apps/api/supervisor.py).
+# Nothing here is created until you connect the repository in the Render dashboard. See docs/deployment.md.
+services:
+  - type: web
+    name: repolens-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      # --- Secrets and per-account values: set in the dashboard, never in this file.
+      - key: DATABASE_URL         # Neon DIRECT connection string (host without "-pooler")
+        sync: false
+      - key: REDIS_URL            # rediss://... (TLS)
+        sync: false
+      - key: WEB_BASE_URL         # https://<project>.vercel.app
+        sync: false
+      - key: WEB_ORIGINS          # the same value as WEB_BASE_URL
+        sync: false
+      - key: API_PUBLIC_URL       # https://<project>.vercel.app/api   (the Vercel URL + /api, NOT the onrender.com URL)
+        sync: false
+      - key: GITHUB_OAUTH_CLIENT_ID
+        sync: false
+      - key: GITHUB_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GUEST_SHOWCASE_REPOSITORIES   # e.g. owner/classlens,rejankarki1/wanderlust,pallets/itsdangerous
+        sync: false
+      # --- Free-tier guards (all optional; see docs/deployment.md for what each does).
+      - key: GENERATION_PROVIDER
+        value: groq
+      - key: IMPORT_GLOBAL_DAILY_LIMIT
+        value: "10"
+      - key: MAX_TOTAL_REPOSITORIES
+        value: "25"
+      - key: IMPORT_HOURLY_LIMIT
+        value: "3"
+      - key: IMPORT_MAX_CONCURRENT_PER_USER
+        value: "1"
+      - key: MAX_REPOSITORIES_PER_USER
+        value: "10"
+      - key: AI_DAILY_LIMIT_PER_USER
+        value: "10"
+      - key: AI_GLOBAL_DAILY_LIMIT
+        value: "200"
+      - key: AI_GLOBAL_CONCURRENCY
+        value: "3"
+      - key: EMBEDDING_BUILD_HOURLY_LIMIT
+        value: "2"
+      - key: ARCHITECTURE_DIAGRAM_HOURLY_LIMIT
+        value: "3"
+      - key: GITHUB_ARCHIVE_MAX_BYTES
+        value: "10485760"
+      - key: EMBEDDING_MAX_CHUNKS_PER_REPOSITORY
+        value: "3000"
+      - key: INGESTION_STALE_QUEUED_SECONDS
+        value: "300"
