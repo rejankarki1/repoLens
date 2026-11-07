@@ -1,0 +1,640 @@
+'use client'
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
+import { useTheme } from 'next-themes'
+import {
+  AlertCircle, CheckCircle2, ChevronDown, Clock, ExternalLink, Loader2, Maximize, RefreshCw, Sparkles, TriangleAlert, X, ZoomIn, ZoomOut,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { requestArchitectureDiagram, type DiagramStatus } from '@/lib/api/architecture-diagram'
+import { useArchitectureDiagram, useArchitectureDiagramStatus } from '@/lib/api/hooks'
+import { fileLink, shortSha } from '@/lib/architecture/model'
+import { DIAGRAM_CLICK_CALLBACK, diagramToMermaid, legendEntries } from '@/lib/architecture-diagram/mermaid'
+import type { ArchitectureDiagram, DiagramComponent } from '@/lib/architecture-diagram/types'
+import { formatRelativeTime } from '@/lib/repo-utils'
+import type { Repository } from '@/lib/types'
+import { cn } from '@/lib/utils'
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : 'Something went wrong.'
+}
+
+/**
+ * AI-identified functional architecture (Phase 6: the real pipeline, not a fixture): reads the generated
+ * diagram from `/architecture-diagram`, compiles it to Mermaid with `diagramToMermaid`, and renders it with
+ * Mermaid.js. A sibling, not a replacement, of the deterministic import-graph explorer
+ * (`architecture/explorer.tsx`) — the two answer different questions about the same repository.
+ *
+ * Generation is never automatic (it spends a real AI call): the user requests it explicitly, same posture
+ * as the rest of this codebase takes toward paid-provider calls.
+ */
+export function ArchitectureDiagramView({ repo }: { repo: Repository }) {
+  const statusQuery = useArchitectureDiagramStatus(repo)
+  const diagramQuery = useArchitectureDiagram(repo, statusQuery.data)
+  const [requestError, setRequestError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  // Generating is a member action (spends the workspace's AI budget); guests only read what already exists.
+  const canGenerate = repo.viewerAccess === 'member'
+  const { mutate: refreshStatus } = statusQuery
+
+  const request = useCallback(
+    async (force: boolean) => {
+      setSubmitting(true)
+      setRequestError(null)
+      try {
+        await requestArchitectureDiagram(repo.id, force)
+        await refreshStatus()
+      } catch (err) {
+        setRequestError(messageOf(err))
+      } finally {
+        setSubmitting(false)
+      }
+    },
+    [repo.id, refreshStatus],
+  )
+
+  if (statusQuery.isLoading) return <DiagramSkeleton />
+  if (statusQuery.error || !statusQuery.data) {
+    return <CenteredMessage icon={<TriangleAlert className="size-5 text-warning" aria-hidden="true" />} message={messageOf(statusQuery.error)} />
+  }
+  const status = statusQuery.data
+  const diagram = diagramQuery.data?.diagram
+
+  if (diagram) {
+    return (
+      <DiagramCanvas
+        repo={repo}
+        diagram={diagram}
+        status={status}
+        requestError={requestError}
+        onRegenerate={canGenerate ? () => void request(status.freshness === 'current') : undefined}
+        regenerating={submitting}
+      />
+    )
+  }
+  if (status.status === 'queued' || status.status === 'running') return <DiagramPendingState status={status} />
+  if (status.status === 'failed') {
+    return (
+      <GenerateState
+        title="Diagram generation failed"
+        message={status.error ?? 'Something went wrong while generating the diagram.'}
+        icon={<AlertCircle className="size-5 text-destructive" aria-hidden="true" />}
+        canGenerate={canGenerate}
+        label="Try again"
+        onGenerate={() => void request(true)}
+        submitting={submitting}
+        requestError={requestError}
+      />
+    )
+  }
+  return (
+    <GenerateState
+      title="No AI architecture diagram yet"
+      message="Generate a diagram that groups this repository's real source files into the functional components a developer would actually point to — authentication, routes, business logic, persistence, integrations — with real and AI-inferred relationships clearly distinguished."
+      icon={<Sparkles className="size-5 text-primary" aria-hidden="true" />}
+      canGenerate={canGenerate}
+      label="Generate diagram"
+      onGenerate={() => void request(false)}
+      submitting={submitting}
+      requestError={requestError}
+    />
+  )
+}
+
+function DiagramSkeleton() {
+  return (
+    <div className="flex h-full flex-col gap-3 p-6" aria-busy="true" aria-label="Loading architecture diagram">
+      <Skeleton className="h-8 w-72" />
+      <Skeleton className="min-h-64 flex-1" />
+    </div>
+  )
+}
+
+function CenteredMessage({ message, detail, icon }: { message: string; detail?: string; icon?: React.ReactNode }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
+      {icon}
+      <p>{message}</p>
+      {detail && <p className="max-w-md text-xs">{detail}</p>}
+    </div>
+  )
+}
+
+/** No diagram exists yet, or the last attempt failed: an explicit call to action, never an automatic request. */
+function GenerateState({
+  title, message, icon, canGenerate, label, onGenerate, submitting, requestError,
+}: {
+  title: string
+  message: string
+  icon: React.ReactNode
+  canGenerate: boolean
+  label: string
+  onGenerate: () => void
+  submitting: boolean
+  requestError: string | null
+}) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+      <div className="flex size-10 items-center justify-center rounded-lg bg-muted">{icon}</div>
+      <p className="text-sm font-medium">{title}</p>
+      <p className="max-w-md text-sm text-muted-foreground">{message}</p>
+      {canGenerate ? (
+        <Button size="sm" onClick={onGenerate} disabled={submitting}>
+          {submitting ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+          {label}
+        </Button>
+      ) : (
+        <p className="text-xs text-muted-foreground">Sign in as a member of this repository to generate a diagram.</p>
+      )}
+      {requestError && <p role="alert" className="max-w-md text-xs text-destructive">{requestError}</p>}
+    </div>
+  )
+}
+
+function DiagramPendingState({ status }: { status: DiagramStatus }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+      <Loader2 className="size-5 animate-spin text-primary" aria-hidden="true" />
+      <p className="text-sm font-medium">{status.status === 'queued' ? 'Waiting for generation to start' : 'Generating the diagram'}</p>
+      <p role="status" className="max-w-md text-sm text-muted-foreground">
+        {status.status === 'queued'
+          ? 'The request is queued and runs in the background. This page updates on its own when it is done.'
+          : 'The AI is identifying functional components from the repository’s structure and source. This usually takes under a minute.'}
+      </p>
+    </div>
+  )
+}
+
+/** Notices that sit above an existing diagram: stale, regenerating, failed. Mirrors `architecture/status.tsx`'s StatusBanners. */
+function DiagramBanners({ status, requestError }: { status: DiagramStatus; requestError: string | null }) {
+  const active = status.status === 'queued' || status.status === 'running'
+  const stale = status.has_result && status.freshness === 'stale'
+  const items: { key: string; tone: 'info' | 'warning' | 'danger'; text: string }[] = []
+
+  if (requestError) items.push({ key: 'request', tone: 'danger', text: `Could not start regeneration: ${requestError}` })
+  if (status.status === 'failed' && status.has_result) {
+    items.push({
+      key: 'failed',
+      tone: 'danger',
+      text: `The latest generation failed${status.error ? `: ${status.error.replace(/[.\s]+$/, '')}` : ''}. The diagram below is the last successful one, for commit ${shortSha(status.generated_commit_sha)}.`,
+    })
+  } else if (stale && active) {
+    items.push({
+      key: 'updating',
+      tone: 'info',
+      text: `Regenerating for commit ${shortSha(status.current_commit_sha)}. Until it finishes, this is the diagram for commit ${shortSha(status.generated_commit_sha)}.`,
+    })
+  } else if (stale) {
+    items.push({
+      key: 'stale',
+      tone: 'warning',
+      text: `This diagram is for commit ${shortSha(status.generated_commit_sha)}, but the repository is now at ${shortSha(status.current_commit_sha)}. Regenerate to update it.`,
+    })
+  } else if (active && status.has_result) {
+    items.push({ key: 'refreshing', tone: 'info', text: 'Regenerating the diagram. This diagram stays available until it finishes.' })
+  }
+  if (items.length === 0) return null
+  return (
+    <div className="flex flex-col">
+      {items.map((b) => (
+        <p
+          key={b.key}
+          role={b.tone === 'danger' ? 'alert' : 'status'}
+          className={cn(
+            'flex items-start gap-2 border-b px-3 py-2 text-xs sm:px-5',
+            b.tone === 'danger' && 'border-destructive/40 bg-destructive/10 text-destructive',
+            b.tone === 'warning' && 'border-warning/40 bg-warning/10 text-warning',
+            b.tone === 'info' && 'border-border bg-muted/40 text-muted-foreground',
+          )}
+        >
+          {b.tone === 'info' ? (
+            <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+          ) : (
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          )}
+          {b.text}
+        </p>
+      ))}
+    </div>
+  )
+}
+
+const MIN_SCALE = 0.1
+const MAX_SCALE = 3
+const ZOOM_STEP = 1.25
+// Below this, fitting the whole graph would make labels unreadable: stay legible and let the user pan.
+const READABLE_SCALE = 0.55
+const FIT_MAX_SCALE = 1.5
+const FIT_PADDING = 32
+const DRAG_THRESHOLD = 4
+
+type Transform = { x: number; y: number; scale: number }
+
+/** Natural size of a Mermaid SVG string, from its viewBox (null if it has none). */
+function svgSize(svg: string): { w: number; h: number } | null {
+  const m = /viewBox="[-\d.]+ [-\d.]+ ([\d.]+) ([\d.]+)"/.exec(svg)
+  return m ? { w: Number(m[1]), h: Number(m[2]) } : null
+}
+
+/** The scale at which content of `size` would be shown fitted into a viewport. */
+function fitScaleFor(size: { w: number; h: number }, vw: number, vh: number) {
+  return Math.min((vw - FIT_PADDING * 2) / size.w, (vh - FIT_PADDING * 2) / size.h)
+}
+
+function DiagramCanvas({
+  repo, diagram, status, requestError, onRegenerate, regenerating,
+}: {
+  repo: Repository
+  diagram: ArchitectureDiagram
+  status: DiagramStatus
+  requestError: string | null
+  onRegenerate?: () => void
+  regenerating: boolean
+}) {
+  const { resolvedTheme } = useTheme()
+  const theme = resolvedTheme === 'dark' ? 'dark' : 'light'
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const transformRef = useRef<Transform>({ x: 0, y: 0, scale: 1 })
+  const [transform, setTransformState] = useState<Transform>({ x: 0, y: 0, scale: 1 })
+  const [fitted, setFitted] = useState(false)
+  const [animate, setAnimate] = useState(false)
+  const [renderError, setRenderError] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const userMoved = useRef(false) // once the user zooms or pans, a resize no longer re-fits behind their back
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
+  const gesture = useRef<{ x: number; y: number; origin: Transform; dist: number; moved: boolean } | null>(null)
+  const suppressClick = useRef(false)
+
+  const componentsById = useMemo(() => new Map(diagram.components.map((c) => [c.id, c])), [diagram])
+  const selected = selectedId ? componentsById.get(selectedId) ?? null : null
+  const lr = useMemo(() => diagramToMermaid(diagram, theme, 'LR'), [diagram, theme])
+  const td = useMemo(() => diagramToMermaid(diagram, theme, 'TD'), [diagram, theme])
+
+  const setTransform = useCallback((next: Transform, smooth = false) => {
+    transformRef.current = next
+    setAnimate(smooth)
+    setTransformState(next)
+  }, [])
+
+  const fitToView = useCallback(
+    (smooth = false) => {
+      const svg = containerRef.current?.querySelector('svg')
+      const viewport = viewportRef.current
+      if (!svg || !viewport) return
+      const w = Number(svg.getAttribute('width'))
+      const h = Number(svg.getAttribute('height'))
+      const vw = viewport.clientWidth
+      const vh = viewport.clientHeight
+      if (!w || !h || !vw || !vh) return
+      // Fit if legible; otherwise stay readable and let the user pan the overflowing axis.
+      const scale = Math.min(FIT_MAX_SCALE, Math.max(READABLE_SCALE, fitScaleFor({ w, h }, vw, vh)))
+      const place = (content: number, view: number) => (content <= view - FIT_PADDING * 2 ? (view - content) / 2 : FIT_PADDING)
+      userMoved.current = false
+      setTransform({ x: place(w * scale, vw), y: place(h * scale, vh), scale }, smooth)
+      setFitted(true)
+    },
+    [setTransform],
+  )
+
+  // The click handler mermaid's `click ... call` directive invokes; see diagramToMermaid's doc comment
+  // for why `securityLevel: "loose"` is safe given this codebase's label-escaping discipline.
+  const nodeIdToComponentId = lr.nodeIdToComponentId
+  useEffect(() => {
+    const scope = window as unknown as Record<string, (nodeId: string) => void>
+    scope[DIAGRAM_CLICK_CALLBACK] = (nodeId: string) => {
+      if (suppressClick.current) return // the pointer was dragging the canvas, not clicking a node
+      const componentId = nodeIdToComponentId[nodeId]
+      if (componentId) setSelectedId(componentId)
+    }
+    return () => {
+      delete scope[DIAGRAM_CLICK_CALLBACK]
+    }
+  }, [nodeIdToComponentId])
+
+  useEffect(() => {
+    let cancelled = false
+    async function render() {
+      setRenderError(null)
+      setFitted(false)
+      try {
+        const mermaid = (await import('mermaid')).default
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: 'loose',
+          theme: 'base',
+          fontFamily: 'inherit',
+          flowchart: {
+            curve: 'basis', // smooth, routed bends rather than mermaid's default sharp linear joins
+            nodeSpacing: 44,
+            rankSpacing: 64,
+            padding: 14,
+          },
+        })
+        const tag = Math.random().toString(36).slice(2)
+        const [a, b] = await Promise.all([
+          mermaid.render(`arch-lr-${tag}`, lr.text),
+          mermaid.render(`arch-td-${tag}`, td.text),
+        ])
+        if (cancelled || !containerRef.current) return
+        // Pick the orientation that fills the actual canvas better (higher fit scale = larger labels), preferring
+        // the wide left-to-right layout unless top-down is clearly better. Deterministic: same size, same choice.
+        const viewport = viewportRef.current
+        const sa = svgSize(a.svg)
+        const sb = svgSize(b.svg)
+        let chosen = a
+        if (viewport && sa && sb) {
+          const fa = fitScaleFor(sa, viewport.clientWidth, viewport.clientHeight)
+          const fb = fitScaleFor(sb, viewport.clientWidth, viewport.clientHeight)
+          if (fb > fa * 1.15) chosen = b
+        }
+        containerRef.current.innerHTML = chosen.svg
+        // Mermaid's SVG is `width="100%"`, which collapses inside this absolutely positioned, transform-scaled
+        // wrapper. Pin it to the rendered content's real bounds (not the padded viewBox) so Fit to view and
+        // zoom operate on the actual diagram, with no unused whitespace around it.
+        const svgEl = containerRef.current.querySelector('svg')
+        if (svgEl) {
+          const pad = 12
+          let box: { x: number; y: number; width: number; height: number } | null = null
+          try {
+            const bb = svgEl.getBBox()
+            if (bb.width > 0 && bb.height > 0) box = { x: bb.x - pad, y: bb.y - pad, width: bb.width + pad * 2, height: bb.height + pad * 2 }
+          } catch {
+            box = null
+          }
+          const vb = svgEl.viewBox.baseVal
+          box ??= vb && vb.width > 0 ? { x: vb.x, y: vb.y, width: vb.width, height: vb.height } : null
+          if (box) {
+            svgEl.setAttribute('viewBox', `${box.x} ${box.y} ${box.width} ${box.height}`)
+            svgEl.setAttribute('width', String(box.width))
+            svgEl.setAttribute('height', String(box.height))
+            svgEl.style.maxWidth = 'none'
+          }
+        }
+        chosen.bindFunctions?.(containerRef.current)
+        fitToView()
+      } catch (err) {
+        if (!cancelled) setRenderError(messageOf(err))
+      }
+    }
+    void render()
+    return () => {
+      cancelled = true
+    }
+  }, [lr, td, fitToView])
+
+  // Keep the fitted view fitted when the canvas is resized, unless the user has taken over the view.
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (!userMoved.current && containerRef.current?.querySelector('svg')) fitToView()
+    })
+    observer.observe(viewport)
+    return () => observer.disconnect()
+  }, [fitToView])
+
+  /** Zoom by `factor` keeping the point (px, py), in viewport coordinates, fixed on screen. */
+  const zoomAt = useCallback(
+    (factor: number, px: number, py: number, smooth = false) => {
+      const t = transformRef.current
+      const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, t.scale * factor))
+      if (scale === t.scale) return
+      const k = scale / t.scale
+      userMoved.current = true
+      setTransform({ scale, x: px - (px - t.x) * k, y: py - (py - t.y) * k }, smooth)
+    },
+    [setTransform],
+  )
+
+  const zoomButton = useCallback(
+    (factor: number) => {
+      const viewport = viewportRef.current
+      if (viewport) zoomAt(factor, viewport.clientWidth / 2, viewport.clientHeight / 2, true)
+    },
+    [zoomAt],
+  )
+
+  // Wheel / trackpad: non-passive native listener so the page never scrolls under the canvas. Pinch on a
+  // trackpad arrives as ctrl+wheel; both zoom around the pointer.
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const rect = viewport.getBoundingClientRect()
+      const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1)
+      zoomAt(Math.exp(-delta * (e.ctrlKey ? 0.01 : 0.0018)), e.clientX - rect.left, e.clientY - rect.top)
+    }
+    viewport.addEventListener('wheel', onWheel, { passive: false })
+    return () => viewport.removeEventListener('wheel', onWheel)
+  }, [zoomAt])
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const pts = [...pointers.current.values()]
+    const dist = pts.length === 2 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : 0
+    gesture.current = { x: e.clientX, y: e.clientY, origin: transformRef.current, dist, moved: false }
+    suppressClick.current = false
+  }, [])
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      const g = gesture.current
+      if (!g || !pointers.current.has(e.pointerId)) return
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      const viewport = viewportRef.current
+      if (!viewport) return
+      const pts = [...pointers.current.values()]
+      if (pts.length === 2 && g.dist > 0) {
+        // Two-finger pinch: zoom around the midpoint.
+        const rect = viewport.getBoundingClientRect()
+        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+        zoomAt(dist / g.dist, (pts[0].x + pts[1].x) / 2 - rect.left, (pts[0].y + pts[1].y) / 2 - rect.top)
+        g.dist = dist
+        g.moved = true
+        suppressClick.current = true
+        return
+      }
+      const dx = e.clientX - g.x
+      const dy = e.clientY - g.y
+      if (!g.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return // still a click on a node
+      if (!g.moved) viewport.setPointerCapture?.(e.pointerId)
+      g.moved = true
+      suppressClick.current = true
+      userMoved.current = true
+      setTransform({ ...g.origin, x: g.origin.x + dx, y: g.origin.y + dy })
+    },
+    [setTransform, zoomAt],
+  )
+
+  const onPointerUp = useCallback((e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId)
+    if (pointers.current.size === 0) {
+      gesture.current = null
+      setTimeout(() => {
+        suppressClick.current = false
+      }, 0)
+    }
+  }, [])
+
+  const active = status.status === 'queued' || status.status === 'running'
+  const chip =
+    active
+      ? { icon: Loader2, spin: true, text: 'Regenerating…', tone: 'text-primary bg-primary/10' }
+      : status.status === 'failed'
+        ? { icon: AlertCircle, spin: false, text: 'Last generation failed', tone: 'text-destructive bg-destructive/10' }
+        : status.freshness === 'current'
+          ? { icon: CheckCircle2, spin: false, text: 'Up to date', tone: 'text-success bg-success/10' }
+          : { icon: Clock, spin: false, text: 'Out of date', tone: 'text-warning bg-warning/10' }
+  const ChipIcon = chip.icon
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-9 shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-1.5 text-xs sm:px-5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <span role="status" className={cn('inline-flex h-6 items-center gap-1.5 rounded-md px-2 font-medium', chip.tone)}>
+            <ChipIcon className={cn('size-3.5', chip.spin && 'animate-spin')} aria-hidden="true" />
+            {chip.text}
+          </span>
+          <span className="text-muted-foreground">
+            Showing commit <code className="font-mono text-foreground">{shortSha(status.generated_commit_sha)}</code>
+            {status.generated_at && <> · generated {formatRelativeTime(status.generated_at)}</>}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          {onRegenerate && (
+            <Button size="xs" variant="outline" onClick={onRegenerate} disabled={active || regenerating}>
+              <RefreshCw className={cn(regenerating && 'animate-spin')} aria-hidden="true" />
+              Regenerate
+            </Button>
+          )}
+          <Button size="icon-xs" variant="outline" aria-label="Zoom out" onClick={() => zoomButton(1 / ZOOM_STEP)}>
+            <ZoomOut aria-hidden="true" />
+          </Button>
+          <Button size="icon-xs" variant="outline" aria-label="Zoom in" onClick={() => zoomButton(ZOOM_STEP)}>
+            <ZoomIn aria-hidden="true" />
+          </Button>
+          <span className="min-w-9 text-center text-[11px] tabular-nums text-muted-foreground" aria-label="Zoom level">
+            {Math.round(transform.scale * 100)}%
+          </span>
+          <Button size="xs" variant="outline" onClick={() => fitToView(true)}>
+            <Maximize aria-hidden="true" />
+            Fit to view
+          </Button>
+        </div>
+      </div>
+      <DiagramBanners status={status} requestError={requestError} />
+      <div className="flex min-h-0 flex-1">
+        <div
+          ref={viewportRef}
+          className="relative min-h-0 flex-1 cursor-grab touch-none overflow-hidden overscroll-contain bg-background active:cursor-grabbing"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          role="img"
+          aria-label="AI-identified architecture diagram"
+        >
+          {renderError ? (
+            <CenteredMessage icon={<TriangleAlert className="size-5 text-warning" aria-hidden="true" />} message={`Could not render the diagram: ${renderError}`} />
+          ) : (
+            <div
+              ref={containerRef}
+              className={cn('absolute left-0 top-0 [&_svg]:block', animate && 'transition-transform duration-150 ease-out motion-reduce:transition-none')}
+              style={{
+                transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+                transformOrigin: '0 0',
+                visibility: fitted ? 'visible' : 'hidden', // no jump: shown only once placed
+              }}
+            />
+          )}
+          <Legend theme={theme} />
+        </div>
+        {selected && <ComponentPanel repoId={repo.id} component={selected} onClose={() => setSelectedId(null)} />}
+      </div>
+      {diagram.warnings.length > 0 && (
+        <details className="shrink-0 border-t border-border px-3 py-1.5 text-xs text-muted-foreground sm:px-5">
+          <summary className="cursor-pointer select-none">{diagram.warnings.length} generation warning{diagram.warnings.length === 1 ? '' : 's'}</summary>
+          <ul className="mt-1 list-inside list-disc">
+            {diagram.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  )
+}
+
+function ComponentPanel({ repoId, component, onClose }: { repoId: string; component: DiagramComponent; onClose: () => void }) {
+  return (
+    <aside className="w-80 shrink-0 overflow-y-auto border-l border-border bg-sidebar/50 p-4 text-sm" aria-label="Component details">
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="font-medium">{component.label}</h3>
+        <Button size="icon-xs" variant="ghost" aria-label="Close" onClick={onClose}>
+          <X aria-hidden="true" />
+        </Button>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">{component.kind.replace('_', ' ')}</p>
+      {component.description && <p className="mt-3 text-muted-foreground">{component.description}</p>}
+      <div className="mt-4">
+        <p className="text-xs font-medium text-muted-foreground">
+          {component.evidence_basis === 'verified_paths' ? 'Real source files' : 'No verified source file for this component'}
+        </p>
+        {component.source_paths.length > 0 ? (
+          <ul className="mt-1.5 flex flex-col gap-1">
+            {component.source_paths.map((path) => (
+              <li key={path}>
+                <Link href={fileLink(repoId, path)} className="inline-flex items-center gap-1 font-mono text-xs text-primary hover:underline">
+                  <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
+                  <span className="truncate" title={path}>{path}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-xs text-muted-foreground">
+            The AI proposed this as a conceptual grouping with no single file backing it.
+          </p>
+        )}
+      </div>
+    </aside>
+  )
+}
+
+function Legend({ theme }: { theme: 'light' | 'dark' }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="absolute bottom-3 left-3 max-w-[calc(100%-1.5rem)] rounded-md border border-border bg-card/90 text-[11px] text-muted-foreground backdrop-blur" onPointerDown={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls="diagram-legend"
+        className="flex h-7 w-full items-center gap-1.5 rounded-md px-2.5 hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+      >
+        <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} aria-hidden="true" />
+        Legend
+      </button>
+      {open && (
+        <div id="diagram-legend" className="flex flex-col gap-1.5 px-2.5 pb-2" aria-label="Legend">
+          {legendEntries(theme).map((entry) => (
+            <div key={entry.category} className="flex items-center gap-2">
+              <span className="size-2.5 rounded-sm border" style={{ backgroundColor: entry.fill, borderColor: entry.stroke }} aria-hidden="true" />
+              {entry.label}
+            </div>
+          ))}
+          <div className="mt-0.5 flex items-center gap-2 border-t border-border pt-1.5">
+            <span className="h-px w-5 bg-foreground" aria-hidden="true" /> Verified import
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-5 border-t border-dashed border-muted-foreground" aria-hidden="true" /> AI-inferred relationship
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

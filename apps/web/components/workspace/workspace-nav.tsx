@@ -7,8 +7,8 @@ import { cn } from '@/lib/utils'
 
 export type WorkspaceTab = 'overview' | 'code' | 'ask' | 'architecture'
 
-export function parseTab(value: string | null): Exclude<WorkspaceTab, 'architecture'> {
-  return value === 'code' || value === 'ask' ? value : 'overview'
+export function parseTab(value: string | null): WorkspaceTab {
+  return value === 'code' || value === 'ask' || value === 'architecture' ? value : 'overview'
 }
 
 export function WorkspaceNav({ id }: { id: string }) {

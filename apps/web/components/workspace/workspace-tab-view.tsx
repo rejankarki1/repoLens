@@ -1,6 +1,7 @@
 'use client'
 
 import { useSearchParams } from 'next/navigation'
+import { ArchitectureDiagramView } from '@/components/workspace/architecture/diagram-view'
 import { CodeExplorer } from '@/components/workspace/code-explorer'
 import { ChatPanel } from '@/components/workspace/chat/chat-panel'
 import { RepositoryGate } from '@/components/workspace/repository-gate'
@@ -23,6 +24,8 @@ export function WorkspaceTabView({ id }: { id: string }) {
           <CodeExplorer repo={repo} file={searchParams.get('file')} lines={searchParams.get('lines')} />
         ) : tab === 'ask' ? (
           <ChatPanel key={repo.id} repo={repo} initialConversationId={parseConversationId(searchParams.get('c'))} />
+        ) : tab === 'architecture' ? (
+          <ArchitectureDiagramView repo={repo} />
         ) : (
           <RepositoryOverview repo={repo} />
         )

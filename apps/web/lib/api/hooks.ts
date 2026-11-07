@@ -7,6 +7,7 @@ import { summarizeFiles } from '@/lib/repo-stats'
 import { isActive as analysisActive, STATUS_POLL_MS } from '@/lib/architecture/model'
 import { getFile, getFileSummaries, getRepository, listRepositories, toFileTree } from './client'
 import { getArchitecture, getArchitectureNode, getArchitectureStatus, type AnalysisStatus } from './architecture'
+import { getArchitectureDiagram, getArchitectureDiagramStatus, type DiagramStatus } from './architecture-diagram'
 import { getSearchIndex, listConversations } from './chat'
 
 /** Queued or being processed by the worker: the status will change on its own, so keep polling. */
@@ -79,6 +80,31 @@ export function useArchitectureGraph(repo: Repository | undefined, status: Analy
   return useSWR(
     repo ? resultKey(status, 'architecture-graph', repo.id) : null,
     () => getArchitecture(repo!.id),
+    { keepPreviousData: true },
+  )
+}
+
+/**
+ * AI architecture diagram status (Architecture Diagram V2). Generation is never requested automatically —
+ * it spends a real AI call — so, unlike `useArchitectureStatus`, nothing here triggers one; it only reads
+ * and polls whatever the user already requested (`requestArchitectureDiagram`).
+ */
+export function useArchitectureDiagramStatus(repo: Repository | undefined) {
+  return useSWR(
+    repo?.indexedCommit ? ['architecture-diagram-status', repo.id, repo.lastAnalyzedAt ?? ''] : null,
+    () => getArchitectureDiagramStatus(repo!.id),
+    { refreshInterval: (data) => (data?.status === 'queued' || data?.status === 'running' ? STATUS_POLL_MS : 0) },
+  )
+}
+
+const diagramResultKey = (status: DiagramStatus | undefined, ...parts: string[]) =>
+  status?.has_result ? [...parts, status.generated_commit_sha ?? '', status.generated_at ?? ''] : null
+
+/** The last completed diagram. Stays available (marked stale by the status) while a newer one generates or fails. */
+export function useArchitectureDiagram(repo: Repository | undefined, status: DiagramStatus | undefined) {
+  return useSWR(
+    repo ? diagramResultKey(status, 'architecture-diagram', repo.id) : null,
+    () => getArchitectureDiagram(repo!.id),
     { keepPreviousData: true },
   )
 }
