@@ -15,8 +15,8 @@ import { fileLink, shortSha } from '@/lib/architecture/model'
 import { DIAGRAM_CLICK_CALLBACK, diagramToMermaid, legendEntries } from '@/lib/architecture-diagram/mermaid'
 import type { ArchitectureDiagram, DiagramComponent } from '@/lib/architecture-diagram/types'
 import {
-  adaptiveMinScale, clampedFitScale, connectedToNode, fitScaleFor, minimapPointToTransform, svgSize, viewportRectInMinimap,
-  type Transform,
+  adaptiveMinScale, centeredTransform, clampedFitScale, connectedToNode, fitScaleFor, minimapPointToTransform, panBy, svgSize,
+  viewportRectInMinimap, wheelIntent, zoomTowardPoint, type Transform,
 } from '@/lib/architecture-diagram/viewport'
 import { formatRelativeTime } from '@/lib/repo-utils'
 import type { Repository } from '@/lib/types'
@@ -239,6 +239,10 @@ const DRAG_THRESHOLD = 4
 // zooms in enough to read them.
 const DECLUTTER_SCALE = 0.75
 const MINIMAP_SIZE = { w: 176, h: 128 }
+const WHEEL_ZOOM_SENSITIVITY = 0.01
+const DOUBLE_CLICK_MS = 400
+const NODE_FOCUS_PADDING = 56
+const NODE_FOCUS_MAX_SCALE = 2
 
 type ContentBox = { x: number; y: number; w: number; h: number }
 
@@ -272,6 +276,7 @@ function DiagramCanvas({
   const pointers = useRef(new Map<number, { x: number; y: number }>())
   const gesture = useRef<{ x: number; y: number; origin: Transform; dist: number; moved: boolean } | null>(null)
   const suppressClick = useRef(false)
+  const lastClick = useRef<{ id: string; time: number } | null>(null)
 
   const componentsById = useMemo(() => new Map(diagram.components.map((c) => [c.id, c])), [diagram])
   const selected = selectedId ? componentsById.get(selectedId) ?? null : null
@@ -290,7 +295,7 @@ function DiagramCanvas({
 
   const fitToView = useCallback(
     (smooth = false) => {
-      const svg = containerRef.current?.querySelector('svg')
+      const svg = containerRef.current?.querySelector<SVGSVGElement>('svg')
       const viewport = viewportRef.current
       if (!svg || !viewport) return
       const w = Number(svg.getAttribute('width'))
@@ -298,33 +303,77 @@ function DiagramCanvas({
       const vw = viewport.clientWidth
       const vh = viewport.clientHeight
       if (!w || !h || !vw || !vh) return
+      // Read the origin straight from the live SVG's viewBox rather than the `contentBox` state, which
+      // could still be stale (from before this render) the first time this runs after a fresh render.
+      const vb = svg.viewBox.baseVal
+      const origin = { x: vb?.x ?? 0, y: vb?.y ?? 0 }
       // Fit if legible; otherwise stay readable and let the user pan the overflowing axis. The graph's own
       // aspect ratio always drives this — nothing here assumes or forces a fixed frame shape.
       const scale = clampedFitScale({ w, h }, vw, vh, { readableScale: READABLE_SCALE, maxScale: FIT_MAX_SCALE, padding: FIT_PADDING })
-      const place = (content: number, view: number) => (content <= view - FIT_PADDING * 2 ? (view - content) / 2 : FIT_PADDING)
+      const placement = centeredTransform({ x: origin.x, y: origin.y, width: w, height: h }, origin, { w: vw, h: vh }, scale, FIT_PADDING)
       userMoved.current = false
-      setTransform({ x: place(w * scale, vw), y: place(h * scale, vh), scale }, smooth)
+      setTransform({ ...placement, scale }, smooth)
       setFitted(true)
     },
     [setTransform],
   )
 
+  /** Double-clicking a node smoothly centers and zooms in on it (capped at `NODE_FOCUS_MAX_SCALE`, so a
+   * tiny node does not balloon to an unreasonable size). `nodeId` is the sanitized mermaid id, matching
+   * the `flowchart-<id>-<n>` element the renderer gave it. */
+  const focusOnNode = useCallback(
+    (nodeId: string) => {
+      const svg = containerRef.current?.querySelector<SVGSVGElement>('svg')
+      const viewport = viewportRef.current
+      const el = containerRef.current?.querySelector<SVGGraphicsElement>(`[id^="flowchart-${nodeId}-"]`)
+      if (!svg || !viewport || !el) return
+      let bb: DOMRect
+      try {
+        bb = el.getBBox()
+      } catch {
+        return
+      }
+      if (bb.width <= 0 || bb.height <= 0) return
+      const vw = viewport.clientWidth
+      const vh = viewport.clientHeight
+      const vb = svg.viewBox.baseVal
+      const origin = { x: vb?.x ?? 0, y: vb?.y ?? 0 }
+      const scale = clampedFitScale({ w: bb.width, h: bb.height }, vw, vh, { readableScale: 0.1, maxScale: NODE_FOCUS_MAX_SCALE, padding: NODE_FOCUS_PADDING })
+      const placement = centeredTransform({ x: bb.x, y: bb.y, width: bb.width, height: bb.height }, origin, { w: vw, h: vh }, scale, NODE_FOCUS_PADDING)
+      userMoved.current = true
+      setTransform({ ...placement, scale }, true)
+    },
+    [setTransform],
+  )
+
   // The click handler mermaid's `click ... call` directive invokes; see diagramToMermaid's doc comment
-  // for why `securityLevel: "loose"` is safe given this codebase's label-escaping discipline. At the
-  // moment, a node click toggles focus (highlighting its neighbors, dimming the rest); clicking it again,
-  // or clicking empty canvas, clears focus. The side panel still opens on every click, as before.
+  // for why `securityLevel: "loose"` is safe given this codebase's label-escaping discipline. A single
+  // click toggles focus (highlighting its neighbors, dimming the rest) and opens the side panel, as
+  // before; a second click on the *same* node within DOUBLE_CLICK_MS is treated as a double-click and
+  // additionally smoothly zooms in on it (mermaid's own `click` directive does not distinguish single
+  // from double clicks, so this is tracked here rather than relying on a native `dblclick` listener).
   const nodeIdToComponentId = lr.nodeIdToComponentId
   useEffect(() => {
     const scope = window as unknown as Record<string, (nodeId: string) => void>
     scope[DIAGRAM_CLICK_CALLBACK] = (nodeId: string) => {
       if (suppressClick.current) return // the pointer was dragging the canvas, not clicking a node
       const componentId = nodeIdToComponentId[nodeId]
-      if (componentId) setSelectedId((current) => (current === componentId ? null : componentId))
+      if (!componentId) return
+      const now = performance.now()
+      const last = lastClick.current
+      if (last && last.id === componentId && now - last.time < DOUBLE_CLICK_MS) {
+        lastClick.current = null
+        setSelectedId(componentId)
+        focusOnNode(nodeId)
+        return
+      }
+      lastClick.current = { id: componentId, time: now }
+      setSelectedId((current) => (current === componentId ? null : componentId))
     }
     return () => {
       delete scope[DIAGRAM_CLICK_CALLBACK]
     }
-  }, [nodeIdToComponentId])
+  }, [nodeIdToComponentId, focusOnNode])
 
   useEffect(() => {
     let cancelled = false
@@ -448,11 +497,10 @@ function DiagramCanvas({
       const w = svg ? Number(svg.getAttribute('width')) : 0
       const h = svg ? Number(svg.getAttribute('height')) : 0
       const minScale = viewport && w && h ? adaptiveMinScale({ w, h }, viewport.clientWidth, viewport.clientHeight, MIN_SCALE) : MIN_SCALE
-      const scale = Math.min(MAX_SCALE, Math.max(minScale, t.scale * factor))
-      if (scale === t.scale) return
-      const k = scale / t.scale
+      const next = zoomTowardPoint(t, factor, { x: px, y: py }, minScale, MAX_SCALE)
+      if (next === t) return
       userMoved.current = true
-      setTransform({ scale, x: px - (px - t.x) * k, y: py - (py - t.y) * k }, smooth)
+      setTransform(next, smooth)
     },
     [setTransform],
   )
@@ -465,22 +513,39 @@ function DiagramCanvas({
     [zoomAt],
   )
 
-  // Wheel / trackpad: non-passive native listener so the page never scrolls under the canvas. Pinch on a
-  // trackpad arrives as ctrl+wheel; both zoom around the pointer.
+  // Wheel / trackpad: non-passive native listener so the page never scrolls under the canvas (and so the
+  // gesture never leaks into it either). The root cause this fixes: every wheel event used to zoom, just
+  // more gently without ctrlKey - a two-finger trackpad pan and an ordinary mouse wheel both arrive as
+  // plain (non-ctrl, non-meta) wheel events, so neither one ever had a code path that actually panned.
+  //
+  // - ctrlKey (a trackpad pinch is reported this way by the browser, indistinguishable from a real
+  //   Ctrl+wheel) or metaKey (Cmd+wheel): zoom toward the cursor.
+  // - otherwise: pan by the raw delta. A two-finger trackpad swipe reports real deltaX and deltaY, so it
+  //   pans in the swiped direction; an ordinary mouse wheel reports only deltaY, so it pans vertically.
+  //   Shift forces horizontal panning, falling back to deltaY as the horizontal source for input devices
+  //   that do not remap it to deltaX themselves when Shift is held.
   useEffect(() => {
     const viewport = viewportRef.current
     if (!viewport) return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
-      const rect = viewport.getBoundingClientRect()
-      const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1)
-      zoomAt(Math.exp(-delta * (e.ctrlKey ? 0.01 : 0.0018)), e.clientX - rect.left, e.clientY - rect.top)
+      const intent = wheelIntent(e)
+      if (intent.type === 'zoom') {
+        const rect = viewport.getBoundingClientRect()
+        zoomAt(Math.exp(-intent.delta * WHEEL_ZOOM_SENSITIVITY), e.clientX - rect.left, e.clientY - rect.top)
+        return
+      }
+      userMoved.current = true
+      setTransform(panBy(transformRef.current, -intent.dx, -intent.dy))
     }
     viewport.addEventListener('wheel', onWheel, { passive: false })
     return () => viewport.removeEventListener('wheel', onWheel)
-  }, [zoomAt])
+  }, [zoomAt, setTransform])
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
+    // Prevents a click-drag that starts over a node's SVG text from turning into a native text selection
+    // (it does not stop the eventual `click` event mermaid's node bindings rely on).
+    e.preventDefault()
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     const pts = [...pointers.current.values()]
     const dist = pts.length === 2 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : 0
@@ -639,7 +704,7 @@ function DiagramCanvas({
       <div className="flex min-h-0 flex-1">
         <div
           ref={viewportRef}
-          className="relative min-h-0 w-full flex-1 cursor-grab touch-none overflow-hidden overscroll-contain bg-background active:cursor-grabbing"
+          className="relative min-h-0 w-full flex-1 cursor-grab touch-none select-none overflow-hidden overscroll-contain bg-background active:cursor-grabbing"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
