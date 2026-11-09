@@ -132,6 +132,28 @@ def test_javascript_functions_classes_and_exports() -> None:
     assert [i.line for i in parsed.imports] == [1, 2]
 
 
+def test_commonjs_module_exports_assignment_recovers_the_function_name() -> None:
+    """`module.exports.name = ...` / `exports.name = ...` (the standard way Node.js backends export
+    functions) name nothing from the library's own structure detection - recovered from the assignment
+    immediately before the function. Real-world regression: a hybrid-search query for the function's name
+    could not rank its own definition, because `symbol`/`symbols` were empty for its chunk."""
+    source = '''
+module.exports.isApiOwner = async (req, res, next) => {
+    next();
+};
+
+exports.isApiReviewAuthor = (req, res, next) => {
+    next();
+};
+'''
+    parsed = parse_source(source.strip() + "\n", "javascript")
+
+    assert parsed.ok
+    assert _names(parsed.symbols) == ["isApiOwner", "isApiReviewAuthor"]
+    chunk = parsed.chunks[0]
+    assert "isApiOwner" in chunk.symbols
+
+
 def test_typescript_interfaces_enums_classes_and_functions() -> None:
     parsed = parse_source(TYPESCRIPT, "typescript")
 

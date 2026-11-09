@@ -76,7 +76,7 @@ Then set Render's `WEB_BASE_URL`/`WEB_ORIGINS`/`API_PUBLIC_URL` to the final Ver
 
 ## Environment variable checklist
 
-**Render** (secrets marked ★): `ENVIRONMENT=production`, `DATABASE_URL`★, `REDIS_URL`★, `WEB_BASE_URL`, `WEB_ORIGINS`, `API_PUBLIC_URL`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`★, `GEMINI_API_KEY`★ (embeddings are always Gemini), `GROQ_API_KEY`★ if `GENERATION_PROVIDER=groq`, `GITHUB_TOKEN`★ (recommended: unauthenticated GitHub calls are 60/hour for everyone), `GUEST_SHOWCASE_REPOSITORIES`, plus the guards in `render.yaml`. The app refuses to start in production if URLs are not https, the OAuth pair is missing, `WEB_BASE_URL` is not in `WEB_ORIGINS`, or the database password is the local one.
+**Render** (secrets marked ★): `ENVIRONMENT=production`, `DATABASE_URL`★, `REDIS_URL`★, `WEB_BASE_URL`, `WEB_ORIGINS`, `API_PUBLIC_URL`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`★, `GEMINI_API_KEY`★ (embeddings are always Gemini), `GROQ_API_KEY`★ if `GENERATION_PROVIDER=groq`, `ARCHITECTURE_DIAGRAM_GENERATION_PROVIDER=gemini` if `GENERATION_PROVIDER=groq` (a diagram prompt is too large for a Groq model's per-request limit; Ask AI is unaffected), `GITHUB_TOKEN`★ (recommended: unauthenticated GitHub calls are 60/hour for everyone), `GUEST_SHOWCASE_REPOSITORIES`, plus the guards in `render.yaml`. The app refuses to start in production if URLs are not https, the OAuth pair is missing, `WEB_BASE_URL` is not in `WEB_ORIGINS`, or the database password is the local one.
 
 **Vercel**: `NEXT_PUBLIC_API_URL`, `API_ORIGIN`. No secrets.
 

@@ -37,6 +37,10 @@ services:
       # --- Free-tier guards (all optional; see docs/deployment.md for what each does).
       - key: GENERATION_PROVIDER
         value: groq
+      # A diagram prompt is much larger than a chat answer and exceeds the Groq model's per-request
+      # size limit (413); Gemini has no such ceiling here. Ask AI is unaffected (still GENERATION_PROVIDER).
+      - key: ARCHITECTURE_DIAGRAM_GENERATION_PROVIDER
+        value: gemini
       - key: IMPORT_GLOBAL_DAILY_LIMIT
         value: "10"
       - key: MAX_TOTAL_REPOSITORIES

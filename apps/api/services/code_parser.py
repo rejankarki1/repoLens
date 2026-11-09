@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 import re
 from bisect import bisect_left, bisect_right
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import tree_sitter_language_pack as tslp
 
@@ -51,6 +51,13 @@ PARSER_FALLBACK = "fallback"
 TEXT_LANGUAGE = "text"
 
 _NEWLINE = re.compile(rb"\n")
+
+# `module.exports.name = ...` / `exports.name = ...` (CommonJS) names the function being assigned, but the
+# library's structure/symbol detection only resolves names from a declaration (`function name`, `const name
+# = ...`) or an ES `export`, so it reports this extremely common Node.js pattern as anonymous. Recovered by
+# looking at the assignment immediately before the function/class, which the library's span already gives us.
+_COMMONJS_EXPORT_NAME = re.compile(r"(?:module\.exports\.|exports\.)([A-Za-z_$][\w$]*)\s*=\s*$")
+_LOOKBEHIND_BYTES = 200
 
 
 class CodeParserError(Exception):
@@ -219,7 +226,7 @@ def parse_source(
     except tslp.Error as exc:  # InvalidRangeError (source too large), ParseFailedError, ...
         raise CodeParserError(f"Could not parse {language} source: {exc}") from exc
 
-    symbols = tuple(_symbol(item) for item in result.structure)
+    symbols = tuple(_recover_commonjs_export_name(_symbol(item), data) for item in result.structure)
     return ParsedFile(
         language=result.language,
         total_lines=result.metrics.total_lines if result.metrics else 0,
@@ -473,6 +480,19 @@ def _safe_end(data: bytes, start: int, end: int) -> int:
     if end > start + 1 and data[end - 1] == 0x0D and data[end] == 0x0A:
         end -= 1
     return end
+
+
+def _recover_commonjs_export_name(symbol: Symbol, data: bytes) -> Symbol:
+    """Backfill `name` for `module.exports.name = <function|class>` / `exports.name = ...` (see
+    `_COMMONJS_EXPORT_NAME`), recursively. Leaves anything already named, or not a function/class, alone."""
+    children = tuple(_recover_commonjs_export_name(child, data) for child in symbol.children)
+    if symbol.name is not None or symbol.kind not in ("function", "class"):
+        return symbol if children == symbol.children else replace(symbol, children=children)
+    window = data[max(0, symbol.start_byte - _LOOKBEHIND_BYTES) : symbol.start_byte].decode("utf-8", "ignore")
+    match = _COMMONJS_EXPORT_NAME.search(window)
+    if match is None:
+        return symbol if children == symbol.children else replace(symbol, children=children)
+    return replace(symbol, name=match.group(1), children=children)
 
 
 def _symbol(item: tslp.StructureItem) -> Symbol:
