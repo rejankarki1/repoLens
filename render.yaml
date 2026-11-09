@@ -63,6 +63,8 @@ services:
         value: "3"
       - key: GITHUB_ARCHIVE_MAX_BYTES
         value: "10485760"
+      # Production cap on chunks embedded per repository (the code default is 10,000). Render applies values in
+      # this file only on a Blueprint sync, so confirm the same variable exists in the dashboard Environment tab.
       - key: EMBEDDING_MAX_CHUNKS_PER_REPOSITORY
         value: "3000"
       - key: INGESTION_STALE_QUEUED_SECONDS

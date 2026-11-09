@@ -51,7 +51,7 @@ missing key is **not** an error: the response is keyword-only, with an entry in 
 * **Configuration (backend environment only):** `GEMINI_API_KEY` (required to enable semantic search; sent in
   the `x-goog-api-key` header, never in a URL, never logged or returned), `EMBEDDING_MODEL`,
   `EMBEDDING_API_BASE_URL`, `EMBEDDING_BATCH_SIZE` (64; capped at 100, Gemini's batch limit),
-  `EMBEDDING_MAX_CHUNKS_PER_REPOSITORY` (10,000 distinct texts per run), `EMBEDDING_QUERY_TIMEOUT_SECONDS` (5).
+  `EMBEDDING_MAX_CHUNKS_PER_REPOSITORY` (10,000 distinct texts per run by default; production sets 3000 in `render.yaml`), `EMBEDDING_QUERY_TIMEOUT_SECONDS` (5).
   `EMBEDDING_DIMENSIONS` must stay 1536 (the column width). `OPENAI_API_KEY` is ignored.
 * **Storage:** `code_embeddings(content_hash, model, embedding)`, keyed by the hash of the chunk text and the
   model key `gemini-embedding-001/1536`. Re-ingesting an unchanged chunk, in any commit or repository, reuses
