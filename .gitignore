@@ -70,3 +70,4 @@ Thumbs.db
 
 # Local dev stack state (pid files, logs)
 .dev/
+.neon
