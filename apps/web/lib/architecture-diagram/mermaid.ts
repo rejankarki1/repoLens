@@ -23,6 +23,10 @@ export interface MermaidDiagram {
   text: string
   /** Mermaid node id -> original `DiagramComponent.id`, for wiring click-to-navigate after rendering. */
   nodeIdToComponentId: Record<string, string>
+  /** (sanitized source id, sanitized target id) per relationship, in the same order as
+   * `diagram.relationships` - lets the viewer match a rendered SVG edge back to its relationship by
+   * position, without parsing Mermaid's internal edge DOM ids. Purely bookkeeping: does not change `text`. */
+  edgeEndpoints: { source: string; target: string }[]
 }
 
 type Category = 'process' | 'worker' | 'ui' | 'data' | 'external' | 'support'
@@ -173,9 +177,11 @@ export function diagramToMermaid(
   }
 
   const linkStyles: string[] = []
+  const edgeEndpoints: { source: string; target: string }[] = []
   diagram.relationships.forEach((r, index) => {
     const sourceId = sanitize(r.source)
     const targetId = sanitize(r.target)
+    edgeEndpoints.push({ source: sourceId, target: targetId })
     const arrow = r.confidence === 'verified' ? '-->' : '-.->'
     const label = mdString([r.label])
     lines.push(`  ${sourceId} ${arrow}|${label}| ${targetId}`)
@@ -204,7 +210,7 @@ export function diagramToMermaid(
     lines.push(`  click ${nodeId} call ${DIAGRAM_CLICK_CALLBACK}("${nodeId}")`)
   }
 
-  return { text: lines.join('\n'), nodeIdToComponentId }
+  return { text: lines.join('\n'), nodeIdToComponentId, edgeEndpoints }
 }
 
 /**

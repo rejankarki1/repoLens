@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useTheme } from 'next-themes'
 import {
-  AlertCircle, CheckCircle2, ChevronDown, Clock, ExternalLink, Loader2, Maximize, RefreshCw, Sparkles, TriangleAlert, X, ZoomIn, ZoomOut,
+  AlertCircle, CheckCircle2, ChevronDown, Clock, ExternalLink, Loader2, Map as MapIcon, Maximize, Minimize2, Expand,
+  RefreshCw, Sparkles, TriangleAlert, X, ZoomIn, ZoomOut,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -13,6 +14,10 @@ import { useArchitectureDiagram, useArchitectureDiagramStatus } from '@/lib/api/
 import { fileLink, shortSha } from '@/lib/architecture/model'
 import { DIAGRAM_CLICK_CALLBACK, diagramToMermaid, legendEntries } from '@/lib/architecture-diagram/mermaid'
 import type { ArchitectureDiagram, DiagramComponent } from '@/lib/architecture-diagram/types'
+import {
+  adaptiveMinScale, clampedFitScale, connectedToNode, fitScaleFor, minimapPointToTransform, svgSize, viewportRectInMinimap,
+  type Transform,
+} from '@/lib/architecture-diagram/viewport'
 import { formatRelativeTime } from '@/lib/repo-utils'
 import type { Repository } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -229,19 +234,13 @@ const READABLE_SCALE = 0.55
 const FIT_MAX_SCALE = 1.5
 const FIT_PADDING = 32
 const DRAG_THRESHOLD = 4
+// Below this zoom level, edge labels and the secondary (filename) node line are hidden: at a glance over a
+// large, dense graph they are unreadable anyway and only add visual noise; they return as soon as the user
+// zooms in enough to read them.
+const DECLUTTER_SCALE = 0.75
+const MINIMAP_SIZE = { w: 176, h: 128 }
 
-type Transform = { x: number; y: number; scale: number }
-
-/** Natural size of a Mermaid SVG string, from its viewBox (null if it has none). */
-function svgSize(svg: string): { w: number; h: number } | null {
-  const m = /viewBox="[-\d.]+ [-\d.]+ ([\d.]+) ([\d.]+)"/.exec(svg)
-  return m ? { w: Number(m[1]), h: Number(m[2]) } : null
-}
-
-/** The scale at which content of `size` would be shown fitted into a viewport. */
-function fitScaleFor(size: { w: number; h: number }, vw: number, vh: number) {
-  return Math.min((vw - FIT_PADDING * 2) / size.w, (vh - FIT_PADDING * 2) / size.h)
-}
+type ContentBox = { x: number; y: number; w: number; h: number }
 
 function DiagramCanvas({
   repo, diagram, status, requestError, onRegenerate, regenerating,
@@ -257,12 +256,18 @@ function DiagramCanvas({
   const theme = resolvedTheme === 'dark' ? 'dark' : 'light'
   const viewportRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const minimapRef = useRef<HTMLDivElement>(null)
   const transformRef = useRef<Transform>({ x: 0, y: 0, scale: 1 })
   const [transform, setTransformState] = useState<Transform>({ x: 0, y: 0, scale: 1 })
   const [fitted, setFitted] = useState(false)
   const [animate, setAnimate] = useState(false)
   const [renderError, setRenderError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [focusMode, setFocusMode] = useState(false)
+  const [showMinimap, setShowMinimap] = useState(true)
+  const [minimapSvg, setMinimapSvg] = useState<string | null>(null)
+  const [contentBox, setContentBox] = useState<ContentBox | null>(null)
+  const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 })
   const userMoved = useRef(false) // once the user zooms or pans, a resize no longer re-fits behind their back
   const pointers = useRef(new Map<number, { x: number; y: number }>())
   const gesture = useRef<{ x: number; y: number; origin: Transform; dist: number; moved: boolean } | null>(null)
@@ -272,6 +277,10 @@ function DiagramCanvas({
   const selected = selectedId ? componentsById.get(selectedId) ?? null : null
   const lr = useMemo(() => diagramToMermaid(diagram, theme, 'LR'), [diagram, theme])
   const td = useMemo(() => diagramToMermaid(diagram, theme, 'TD'), [diagram, theme])
+  // `nodeIdToComponentId` and `edgeEndpoints` depend only on the deterministic order components/relationships
+  // are iterated in, never on direction, so lr's and td's are always identical; either can be used regardless
+  // of which orientation actually gets rendered (same reasoning the original code already relied on below).
+  const focused = selectedId ? connectedToNode(lr.edgeEndpoints, selectedId) : null
 
   const setTransform = useCallback((next: Transform, smooth = false) => {
     transformRef.current = next
@@ -289,8 +298,9 @@ function DiagramCanvas({
       const vw = viewport.clientWidth
       const vh = viewport.clientHeight
       if (!w || !h || !vw || !vh) return
-      // Fit if legible; otherwise stay readable and let the user pan the overflowing axis.
-      const scale = Math.min(FIT_MAX_SCALE, Math.max(READABLE_SCALE, fitScaleFor({ w, h }, vw, vh)))
+      // Fit if legible; otherwise stay readable and let the user pan the overflowing axis. The graph's own
+      // aspect ratio always drives this — nothing here assumes or forces a fixed frame shape.
+      const scale = clampedFitScale({ w, h }, vw, vh, { readableScale: READABLE_SCALE, maxScale: FIT_MAX_SCALE, padding: FIT_PADDING })
       const place = (content: number, view: number) => (content <= view - FIT_PADDING * 2 ? (view - content) / 2 : FIT_PADDING)
       userMoved.current = false
       setTransform({ x: place(w * scale, vw), y: place(h * scale, vh), scale }, smooth)
@@ -300,14 +310,16 @@ function DiagramCanvas({
   )
 
   // The click handler mermaid's `click ... call` directive invokes; see diagramToMermaid's doc comment
-  // for why `securityLevel: "loose"` is safe given this codebase's label-escaping discipline.
+  // for why `securityLevel: "loose"` is safe given this codebase's label-escaping discipline. At the
+  // moment, a node click toggles focus (highlighting its neighbors, dimming the rest); clicking it again,
+  // or clicking empty canvas, clears focus. The side panel still opens on every click, as before.
   const nodeIdToComponentId = lr.nodeIdToComponentId
   useEffect(() => {
     const scope = window as unknown as Record<string, (nodeId: string) => void>
     scope[DIAGRAM_CLICK_CALLBACK] = (nodeId: string) => {
       if (suppressClick.current) return // the pointer was dragging the canvas, not clicking a node
       const componentId = nodeIdToComponentId[nodeId]
-      if (componentId) setSelectedId(componentId)
+      if (componentId) setSelectedId((current) => (current === componentId ? null : componentId))
     }
     return () => {
       delete scope[DIAGRAM_CLICK_CALLBACK]
@@ -371,9 +383,14 @@ function DiagramCanvas({
             svgEl.setAttribute('width', String(box.width))
             svgEl.setAttribute('height', String(box.height))
             svgEl.style.maxWidth = 'none'
+            setContentBox({ x: box.x, y: box.y, w: box.width, h: box.height })
           }
         }
         chosen.bindFunctions?.(containerRef.current)
+        // A second, non-interactive copy for the minimap: same trusted, already-escaped SVG markup the
+        // main canvas just rendered (see diagramToMermaid's doc comment on label escaping), just displayed
+        // smaller. No click bindings are attached to it, so it is inert except for our own drag/click-to-pan.
+        setMinimapSvg(containerRef.current.innerHTML)
         fitToView()
       } catch (err) {
         if (!cancelled) setRenderError(messageOf(err))
@@ -386,21 +403,52 @@ function DiagramCanvas({
   }, [lr, td, fitToView])
 
   // Keep the fitted view fitted when the canvas is resized, unless the user has taken over the view.
+  // Also tracks the viewport's size in state (for the minimap) - a ref cannot be read during render.
   useEffect(() => {
     const viewport = viewportRef.current
-    if (!viewport || typeof ResizeObserver === 'undefined') return
+    if (!viewport) return
+    setViewportSize({ w: viewport.clientWidth, h: viewport.clientHeight })
+    if (typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
+      setViewportSize({ w: viewport.clientWidth, h: viewport.clientHeight })
       if (!userMoved.current && containerRef.current?.querySelector('svg')) fitToView()
     })
     observer.observe(viewport)
     return () => observer.disconnect()
   }, [fitToView])
 
-  /** Zoom by `factor` keeping the point (px, py), in viewport coordinates, fixed on screen. */
+  // Entering or leaving focus mode changes the available space outright (a user action, not an organic
+  // resize), so it always re-fits, even if the user had already taken over panning/zooming.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      userMoved.current = false
+      fitToView(true)
+    })
+    return () => cancelAnimationFrame(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only on focusMode changes
+  }, [focusMode])
+
+  useEffect(() => {
+    if (!focusMode) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFocusMode(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [focusMode])
+
+  /** Zoom by `factor` keeping the point (px, py), in viewport coordinates, fixed on screen. The lower
+   * bound adapts to the graph's own size: a huge graph can always be zoomed out far enough to see all of
+   * it, while a small one never zooms out to an illegible speck past `MIN_SCALE`. */
   const zoomAt = useCallback(
     (factor: number, px: number, py: number, smooth = false) => {
       const t = transformRef.current
-      const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, t.scale * factor))
+      const viewport = viewportRef.current
+      const svg = containerRef.current?.querySelector('svg')
+      const w = svg ? Number(svg.getAttribute('width')) : 0
+      const h = svg ? Number(svg.getAttribute('height')) : 0
+      const minScale = viewport && w && h ? adaptiveMinScale({ w, h }, viewport.clientWidth, viewport.clientHeight, MIN_SCALE) : MIN_SCALE
+      const scale = Math.min(MAX_SCALE, Math.max(minScale, t.scale * factor))
       if (scale === t.scale) return
       const k = scale / t.scale
       userMoved.current = true
@@ -480,6 +528,49 @@ function DiagramCanvas({
     }
   }, [])
 
+  // Dim everything not connected to the selected node, and reduce label clutter below DECLUTTER_SCALE.
+  // Visual-only DOM styling: never touches the generated diagram's nodes, edges or labels.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || !fitted) return
+    const declutter = transform.scale < DECLUTTER_SCALE
+    for (const label of container.querySelectorAll<HTMLElement>('.edgeLabel, .edgeLabels')) {
+      label.style.opacity = declutter ? '0' : ''
+      label.style.transition = 'opacity 120ms ease-out'
+    }
+    const nodes = container.querySelectorAll<SVGGElement>('.node')
+    const edgePaths = container.querySelectorAll<SVGGElement>('.edgePaths > .edgePath, .edgePath')
+    const idFromNode = (el: Element) => /^flowchart-(.+)-\d+$/.exec(el.id)?.[1]
+    for (const node of nodes) {
+      const id = idFromNode(node)
+      const dim = !!focused && !!id && !focused.nodeIds.has(id)
+      node.style.opacity = dim ? '0.25' : ''
+      node.style.transition = 'opacity 120ms ease-out'
+    }
+    // Edge DOM ids are not a stable cross-version contract; only style edges by render order when the
+    // matched element count agrees with the relationship count, otherwise leave them alone (node dimming
+    // still conveys focus on its own).
+    if (focused && edgePaths.length === lr.edgeEndpoints.length) {
+      edgePaths.forEach((path, i) => {
+        const dim = !focused.edgeIndexes.has(i)
+        path.style.opacity = dim ? '0.15' : ''
+        path.style.transition = 'opacity 120ms ease-out'
+      })
+    } else if (!focused) {
+      edgePaths.forEach((path) => {
+        path.style.opacity = ''
+      })
+    }
+  }, [focused, transform.scale, fitted, lr.edgeEndpoints.length])
+
+  const navigateTo = useCallback(
+    (next: { x: number; y: number }) => {
+      userMoved.current = true
+      setTransform({ ...transformRef.current, x: next.x, y: next.y })
+    },
+    [setTransform],
+  )
+
   const active = status.status === 'queued' || status.status === 'running'
   const chip =
     active
@@ -492,8 +583,8 @@ function DiagramCanvas({
   const ChipIcon = chip.icon
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-h-9 shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-1.5 text-xs sm:px-5">
+    <div className={cn('flex h-full min-h-0 flex-col', focusMode && 'fixed inset-0 z-50 bg-background')}>
+      <div className="flex min-h-9 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-1.5 text-xs sm:px-5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <span role="status" className={cn('inline-flex h-6 items-center gap-1.5 rounded-md px-2 font-medium', chip.tone)}>
             <ChipIcon className={cn('size-3.5', chip.spin && 'animate-spin')} aria-hidden="true" />
@@ -511,6 +602,15 @@ function DiagramCanvas({
               Regenerate
             </Button>
           )}
+          <Button
+            size="icon-xs"
+            variant={showMinimap ? 'default' : 'outline'}
+            aria-label={showMinimap ? 'Hide minimap' : 'Show minimap'}
+            aria-pressed={showMinimap}
+            onClick={() => setShowMinimap((v) => !v)}
+          >
+            <MapIcon aria-hidden="true" />
+          </Button>
           <Button size="icon-xs" variant="outline" aria-label="Zoom out" onClick={() => zoomButton(1 / ZOOM_STEP)}>
             <ZoomOut aria-hidden="true" />
           </Button>
@@ -522,7 +622,16 @@ function DiagramCanvas({
           </span>
           <Button size="xs" variant="outline" onClick={() => fitToView(true)}>
             <Maximize aria-hidden="true" />
-            Fit to view
+            Reset view
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="outline"
+            aria-label={focusMode ? 'Exit full-screen' : 'Full screen'}
+            aria-pressed={focusMode}
+            onClick={() => setFocusMode((v) => !v)}
+          >
+            {focusMode ? <Minimize2 aria-hidden="true" /> : <Expand aria-hidden="true" />}
           </Button>
         </div>
       </div>
@@ -530,7 +639,7 @@ function DiagramCanvas({
       <div className="flex min-h-0 flex-1">
         <div
           ref={viewportRef}
-          className="relative min-h-0 flex-1 cursor-grab touch-none overflow-hidden overscroll-contain bg-background active:cursor-grabbing"
+          className="relative min-h-0 w-full flex-1 cursor-grab touch-none overflow-hidden overscroll-contain bg-background active:cursor-grabbing"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -551,7 +660,22 @@ function DiagramCanvas({
               }}
             />
           )}
+          {selected && (
+            <p className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md border border-border bg-card/90 px-2.5 py-1 text-[11px] text-muted-foreground backdrop-blur">
+              Highlighting what connects to <span className="font-medium text-foreground">{selected.label}</span> — click it again to clear
+            </p>
+          )}
           <Legend theme={theme} />
+          {showMinimap && minimapSvg && contentBox && (
+            <Minimap
+              ref={minimapRef}
+              svg={minimapSvg}
+              content={contentBox}
+              transform={transform}
+              viewportSize={{ w: viewportSize.w || 1, h: viewportSize.h || 1 }}
+              onNavigate={navigateTo}
+            />
+          )}
         </div>
         {selected && <ComponentPanel repoId={repo.id} component={selected} onClose={() => setSelectedId(null)} />}
       </div>
@@ -565,6 +689,71 @@ function DiagramCanvas({
           </ul>
         </details>
       )}
+    </div>
+  )
+}
+
+/** Small always-to-scale overview of the whole graph, with a draggable rectangle for the main viewport's
+ * current position. Click or drag inside it to jump the main view there; the zoom level is unchanged. A
+ * non-interactive clone of the already-rendered (and already label-escaped) SVG — see the render effect's
+ * comment on why reusing that markup here is exactly as safe as the main canvas. */
+function Minimap({
+  svg, content, transform, viewportSize, onNavigate, ref,
+}: {
+  svg: string
+  content: ContentBox
+  transform: Transform
+  viewportSize: { w: number; h: number }
+  onNavigate: (next: { x: number; y: number }) => void
+  ref: React.Ref<HTMLDivElement>
+}) {
+  const svgHostRef = useRef<HTMLDivElement>(null)
+  const dragging = useRef(false)
+
+  useEffect(() => {
+    if (svgHostRef.current) svgHostRef.current.innerHTML = svg
+  }, [svg])
+
+  const rect = viewportRectInMinimap(transform, viewportSize, { w: content.w, h: content.h }, { x: content.x, y: content.y }, MINIMAP_SIZE)
+
+  const jump = useCallback(
+    (clientX: number, clientY: number, container: HTMLDivElement) => {
+      const bounds = container.getBoundingClientRect()
+      const point = { x: clientX - bounds.left, y: clientY - bounds.top }
+      onNavigate(
+        minimapPointToTransform(point, viewportSize, { w: content.w, h: content.h }, { x: content.x, y: content.y }, MINIMAP_SIZE, transform.scale),
+      )
+    },
+    [content, onNavigate, transform.scale, viewportSize],
+  )
+
+  return (
+    <div
+      ref={ref}
+      className="absolute bottom-3 right-3 overflow-hidden rounded-md border border-border bg-card/90 shadow-sm backdrop-blur"
+      style={{ width: MINIMAP_SIZE.w, height: MINIMAP_SIZE.h }}
+      aria-label="Diagram overview (minimap)"
+      onPointerDown={(e) => {
+        e.stopPropagation()
+        dragging.current = true
+        jump(e.clientX, e.clientY, e.currentTarget)
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+      }}
+      onPointerMove={(e) => {
+        if (dragging.current) jump(e.clientX, e.clientY, e.currentTarget)
+      }}
+      onPointerUp={() => {
+        dragging.current = false
+      }}
+      onPointerCancel={() => {
+        dragging.current = false
+      }}
+    >
+      <div ref={svgHostRef} className="pointer-events-none absolute inset-0 opacity-80 [&_svg]:h-full [&_svg]:w-full" />
+      <div
+        className="absolute cursor-move border-2 border-primary bg-primary/10"
+        style={{ left: rect.x, top: rect.y, width: Math.max(rect.width, 4), height: Math.max(rect.height, 4) }}
+      />
     </div>
   )
 }

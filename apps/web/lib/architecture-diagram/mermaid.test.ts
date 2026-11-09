@@ -147,6 +147,21 @@ test('every component gets a click directive whose argument is always the saniti
   assert.ok(/^[A-Za-z0-9_]+$/.test(nodeId)) // safe to embed in a quoted call argument unescaped
 })
 
+test('edgeEndpoints gives the sanitized (source, target) ids in the same order as diagram.relationships', () => {
+  const d = diagram({
+    components: [component({ id: 'c1' }), component({ id: 'c2' }), component({ id: 'c3' })],
+    relationships: [
+      relationship({ id: 'r1', source: 'c1', target: 'c2' }),
+      relationship({ id: 'r2', source: 'c2', target: 'c3' }),
+    ],
+  })
+  const { edgeEndpoints, nodeIdToComponentId } = diagramToMermaid(d)
+  assert.equal(edgeEndpoints.length, 2)
+  const byComponent = Object.fromEntries(Object.entries(nodeIdToComponentId).map(([k, v]) => [v, k]))
+  assert.deepEqual(edgeEndpoints[0], { source: byComponent.c1, target: byComponent.c2 })
+  assert.deepEqual(edgeEndpoints[1], { source: byComponent.c2, target: byComponent.c3 })
+})
+
 test('an empty diagram still produces a valid, parseable-shaped flowchart header', () => {
   const { text } = diagramToMermaid(diagram({}))
   assert.equal(text.trim(), 'flowchart LR')
