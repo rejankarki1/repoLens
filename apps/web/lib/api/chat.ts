@@ -57,6 +57,7 @@ export interface ApiSearchIndex {
   chunks: number
   embedded_chunks: number
   semantic: 'disabled' | 'not_built' | 'partial' | 'ready'
+  embedding_job_running: boolean
 }
 
 /* ---------------------------------- UI types ---------------------------------- */
@@ -223,6 +224,17 @@ export async function clearConversations(repoId: string): Promise<number> {
 
 export async function getSearchIndex(repoId: string): Promise<ApiSearchIndex> {
   return json<ApiSearchIndex>(`${API_URL}/repositories/${encodeURIComponent(repoId)}/search-index`)
+}
+
+/**
+ * Resumes (or starts) building the semantic index: queues the background job that embeds whatever chunks
+ * still lack a vector, picking up exactly where a previous attempt left off. Safe to call repeatedly - the
+ * backend itself refuses a duplicate (409, already running or queued) and enforces the per-user hourly
+ * quota (429), so this never queues two jobs or spends unbounded provider budget; callers only need to
+ * show `ApiError.message` when it rejects.
+ */
+export async function buildSearchIndex(repoId: string): Promise<ApiSearchIndex> {
+  return json<ApiSearchIndex>(`${API_URL}/repositories/${encodeURIComponent(repoId)}/embeddings`, { method: 'POST' })
 }
 
 /* -------------------------------- Streaming ---------------------------------- */

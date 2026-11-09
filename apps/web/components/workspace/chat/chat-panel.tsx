@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useSWRConfig } from 'swr'
-import { ArrowUp, History, Info, MessageSquarePlus, Square } from 'lucide-react'
+import { ArrowUp, History, Info, Loader2, MessageSquarePlus, Square } from 'lucide-react'
 import { ChatMessageView } from '@/components/workspace/chat/chat-message'
 import { ConversationList } from '@/components/workspace/chat/conversation-list'
 import { AskRestricted } from '@/components/auth/access-prompt'
@@ -12,6 +12,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  buildSearchIndex,
   ChatError,
   clearConversations,
   createConversation,
@@ -25,6 +26,7 @@ import {
 } from '@/lib/api/chat'
 import { ApiError } from '@/lib/api/client'
 import { useConversations, useSearchIndex } from '@/lib/api/hooks'
+import { resumeIndexingAction } from '@/lib/api/search-index-ui'
 import { makeTitle } from '@/lib/chat-title'
 import type { Repository } from '@/lib/types'
 import { useMediaQuery } from '@/lib/use-media-query'
@@ -67,7 +69,9 @@ export function ChatPanel(props: ChatPanelProps) {
 function MemberChatPanel({ repo, initialConversationId = null }: ChatPanelProps) {
   const { mutate } = useSWRConfig()
   const { data: history, error: historyError, isLoading: historyLoading } = useConversations(repo.id)
-  const { data: index } = useSearchIndex(repo)
+  const { data: index, mutate: refreshIndex } = useSearchIndex(repo)
+  const [resuming, setResuming] = useState(false)
+  const [resumeError, setResumeError] = useState<string | null>(null)
 
   const [activeId, setActiveId] = useState<number | null>(initialConversationId)
   const startId = useRef(initialConversationId)
@@ -104,6 +108,21 @@ function MemberChatPanel({ repo, initialConversationId = null }: ChatPanelProps)
   }, [messages])
 
   const refreshList = useCallback(() => mutate(['conversations', repo.id]), [mutate, repo.id])
+
+  /** Resumes (or starts) building the semantic index. The backend itself refuses a duplicate job and
+   * enforces the hourly quota, so this only needs to show whatever message it sends back on refusal. */
+  const resumeIndexing = useCallback(async () => {
+    setResuming(true)
+    setResumeError(null)
+    try {
+      await buildSearchIndex(repo.id)
+      await refreshIndex()
+    } catch (err) {
+      setResumeError(messageOf(err, 'Could not resume indexing.'))
+    } finally {
+      setResuming(false)
+    }
+  }, [repo.id, refreshIndex])
 
   // Opening `?tab=ask&c=12` (a bookmark, a refresh, or Back from the Code Explorer) shows that conversation again.
   useEffect(() => {
@@ -311,6 +330,7 @@ function MemberChatPanel({ repo, initialConversationId = null }: ChatPanelProps)
   const retryable = last?.role === 'assistant' && (last.status === 'failed' || last.status === 'stopped') && !busy
   const retry = retryable ? () => void send(messages[messages.length - 2]?.content ?? '', { dropLastTurn: true }) : undefined
   const indexNote = describeIndex(index)
+  const resumeAction = resumeIndexingAction(index)
 
   const list = (
     <ConversationList
@@ -402,7 +422,18 @@ function MemberChatPanel({ repo, initialConversationId = null }: ChatPanelProps)
                 This repository has no searchable code index yet. Use Re-analyze above to build it, then ask again.
               </Note>
             ) : (
-              indexNote && <Note>{indexNote}</Note>
+              (indexNote || resumeAction.visible || resumeError) && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {indexNote && <Note>{indexNote}</Note>}
+                  {resumeAction.visible && (
+                    <Button size="xs" variant="outline" onClick={() => void resumeIndexing()} disabled={resumeAction.disabled || resuming}>
+                      {(resuming || resumeAction.disabled) && <Loader2 className="animate-spin" aria-hidden="true" />}
+                      {resuming ? 'Starting…' : resumeAction.label}
+                    </Button>
+                  )}
+                  {resumeError && <Note tone="warning">{resumeError}</Note>}
+                </div>
+              )
             )}
             <form onSubmit={handleSubmit} className="flex items-end gap-2">
               <Textarea
