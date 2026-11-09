@@ -1,13 +1,34 @@
 'use client'
 
 import Image from 'next/image'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { Loader2, LogOut } from 'lucide-react'
-import { useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { GitHubSignIn } from '@/components/auth/github-sign-in'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
+import { authErrorMessage } from '@/lib/auth/import-resume'
 import { useAuth } from '@/lib/auth/use-auth'
+
+/** A failed or cancelled sign-in can return to any page (`next` is wherever the visitor started from), not just
+ * `/dashboard`. `/dashboard` already shows this itself (next to the import box, with its own query-string cleanup),
+ * so this only covers every other page. */
+function GuestSignInError() {
+  const pathname = usePathname()
+  const params = useSearchParams().toString()
+  const [message] = useState(() => (pathname === '/dashboard' ? null : authErrorMessage(params)))
+
+  useEffect(() => {
+    if (message) window.history.replaceState(null, '', window.location.pathname)
+  }, [message])
+
+  if (!message) return null
+  return (
+    <p role="status" className="text-xs text-destructive">
+      {message}
+    </p>
+  )
+}
 
 /** Bottom of the sidebar: who is signed in with a sign-out action, or Continue with GitHub for a visitor. */
 export function UserMenu() {
@@ -27,6 +48,9 @@ export function UserMenu() {
   if (!authenticated || !user) {
     return (
       <div className="flex flex-col gap-2 border-t border-sidebar-border p-3">
+        <Suspense fallback={null}>
+          <GuestSignInError />
+        </Suspense>
         <p className="text-xs text-muted-foreground">Browsing as a guest. Sign in to analyze repositories and ask questions.</p>
         <div className="flex items-center gap-2">
           <GitHubSignIn next={pathname === '/' ? '/repositories' : pathname} size="sm" className="flex-1" />

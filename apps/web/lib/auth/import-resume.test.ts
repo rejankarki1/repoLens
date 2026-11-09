@@ -5,7 +5,7 @@ import { authErrorMessage, pendingImport, resumePath } from './import-resume.ts'
 test('the pasted URL survives the sign-in round trip', () => {
   const url = 'https://github.com/pallets/flask'
   const path = resumePath(url)
-  assert.equal(path, '/repositories?import=https%3A%2F%2Fgithub.com%2Fpallets%2Fflask')
+  assert.equal(path, '/dashboard?import=https%3A%2F%2Fgithub.com%2Fpallets%2Fflask')
   assert.equal(pendingImport(path.slice(path.indexOf('?'))), url)
 })
 

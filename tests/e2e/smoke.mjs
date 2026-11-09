@@ -10,7 +10,7 @@ const text = (d) => d.ev('document.body.innerText')
 
 const d = await connect(CDP)
 async function paste(url) {
-  await d.goto(`${WEB}/repositories`, 2500)
+  await d.goto(`${WEB}/dashboard`, 2500)
   await d.clickOn('#repo-url'); await d.type(url); await d.enter(); await d.sleep(1200)
 }
 async function signInAs(user) {

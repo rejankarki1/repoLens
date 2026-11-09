@@ -32,6 +32,11 @@ os.environ["INGESTION_QUEUE_NAME"] = "repolens-test-ingestion"
 os.environ["INGESTION_SWEEP_INTERVAL_SECONDS"] = "0"
 for _secret in ("GEMINI_API_KEY", "GROQ_API_KEY", "GITHUB_TOKEN", "GITHUB_OAUTH_CLIENT_SECRET"):
     os.environ[_secret] = ""  # tests use fakes; a stray real call must be impossible, not merely unlikely
+# README/docs/deployment.md tell developers to `set -a && . ./.env` for Alembic commands, which leaves these in the
+# shell for every later command including pytest. Tests must see the code's own defaults, not whatever the
+# developer's shell happens to export, so drop them rather than blank them (they aren't plain strings).
+for _tunable in ("GENERATION_PROVIDER", "ARCHITECTURE_DIAGRAM_GENERATION_PROVIDER", "GROQ_REASONING_EFFORT"):
+    os.environ.pop(_tunable, None)
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator

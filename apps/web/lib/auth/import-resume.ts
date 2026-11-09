@@ -2,9 +2,11 @@
 
 const KEY = 'import'
 
-/** Where the API sends the browser after sign-in so the pasted repository is imported automatically. */
+/** Where the API sends the browser after sign-in so the pasted repository is imported automatically.
+ * Must be a page that renders `RepositoryImportForm` (currently only `/dashboard`) - that component is
+ * what reads this query param back via `pendingImport` and resumes the import. */
 export function resumePath(githubUrl: string): string {
-  return `/repositories?${KEY}=${encodeURIComponent(githubUrl)}`
+  return `/dashboard?${KEY}=${encodeURIComponent(githubUrl)}`
 }
 
 /** The pasted repository URL carried by the page URL, if any (length-bounded; the server validates it again). */
