@@ -203,11 +203,12 @@ class SearchHit:
     keyword_rank: int | None
     semantic_rank: int | None
     exact_rank: int | None = None
+    structure_reason: str | None = None  # set when repository-structure discovery (not search) chose this chunk
 
     @property
     def matched_by(self) -> list[str]:
         ranks = (("keyword", self.keyword_rank), ("exact", self.exact_rank), ("semantic", self.semantic_rank))
-        return [name for name, rank in ranks if rank is not None]
+        return [name for name, rank in ranks if rank is not None] + (["structure"] if self.structure_reason else [])
 
 
 @dataclass(slots=True)

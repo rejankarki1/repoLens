@@ -314,3 +314,80 @@ def detect_technologies(deps: list[ManifestDep], imports: dict[tuple[str, str], 
         code = [e for e in evidence if e.kind != "manifest"][:3]
         result.append(Technology(id="tech:" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-"), name=name, category=category, evidence=manifest + code))
     return result
+
+
+# --- entry points -------------------------------------------------------------------------------------------
+#
+# "Where does execution start?" Role detection above only labels a file `entrypoint` when it also imports the
+# framework that serves it. Real projects split that up: `server.js` does `const app = require("./app")` and
+# `app.listen(...)`, `main.jsx` does `createRoot(...).render(...)` -- neither imports express, so neither got a
+# role. These rules recognise the start-up *construct itself* (a listening server, a UI mount, a script
+# guard, a `main` function), independent of any import, in any language listed. Each match is a line of code,
+# never a file name: a file called `index.js` that does none of this is not reported.
+
+_JS_EXTS = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".vue", ".svelte")
+_SKIPPED_DIRS = re.compile(r"(?:^|/)(?:node_modules|vendor|dist|build|\.next|\.venv|venv|site-packages|target)/")
+
+
+@dataclass(frozen=True, slots=True)
+class EntryRule:
+    kind: str  # server_start | ui_bootstrap | script_main | app_object
+    area: str  # backend | frontend | cli
+    pattern: re.Pattern[str]
+    markers: tuple[str, ...]  # literal substrings; a file without any of them cannot match (cheap prefilter, also used in SQL)
+    exts: tuple[str, ...]
+    why: str
+
+
+ENTRY_RULES: tuple[EntryRule, ...] = (
+    EntryRule("server_start", "backend", re.compile(r"\b[A-Za-z_$][\w$]*\.listen\s*\("), (".listen",), _JS_EXTS, "starts listening for requests"),
+    EntryRule("server_start", "backend", re.compile(r"\b(?:Deno|Bun)\.serve\s*\(|\bNestFactory\.create\s*\("), ("serve", "NestFactory"), _JS_EXTS, "starts an HTTP server"),
+    EntryRule("ui_bootstrap", "frontend", re.compile(r"\b(?:createRoot|hydrateRoot)\s*\(|\bReactDOM\.(?:render|hydrate)\s*\("), ("createRoot", "hydrateRoot", "ReactDOM"), _JS_EXTS, "mounts the React application"),
+    EntryRule("ui_bootstrap", "frontend", re.compile(r"\bcreateApp\s*\(.*\)\.mount\s*\(|\bnew\s+Vue\s*\("), ("createApp", "new Vue"), _JS_EXTS, "mounts the Vue application"),
+    EntryRule("ui_bootstrap", "frontend", re.compile(r"\bbootstrapApplication\s*\(|\.bootstrapModule\s*\("), ("bootstrapApplication", "bootstrapModule"), _JS_EXTS, "bootstraps the Angular application"),
+    EntryRule("ui_bootstrap", "frontend", re.compile(r"\bnew\s+App\s*\(\s*\{\s*target\b|\bmount\s*\(\s*App\b"), ("target", "mount("), _JS_EXTS, "mounts the Svelte application"),
+    EntryRule("ui_bootstrap", "frontend", re.compile(r"\bAppRegistry\.registerComponent\s*\(|\bregisterRootComponent\s*\("), ("registerComponent", "registerRootComponent"), _JS_EXTS, "registers the React Native root component"),
+    EntryRule("server_start", "backend", re.compile(r"\buvicorn\.run\s*\(|\b(?:app|application|server)\.run\s*\(|\bget_[aw]sgi_application\s*\(|\bexecute_from_command_line\s*\("), ("uvicorn.run", ".run(", "_application(", "execute_from_command_line"), (".py",), "starts the web server"),
+    EntryRule("app_object", "backend", _PY_APP, ("FastAPI(", "Flask(", "Quart(", "Sanic(", "Starlette("), (".py",), "creates the web application object"),
+    EntryRule("script_main", "cli", _PY_MAIN, ("__main__",), (".py",), "runs when the file is executed directly"),
+    EntryRule("script_main", "cli", re.compile(r"^func\s+main\s*\(\s*\)", re.M), ("func main",), (".go",), "Go program entry point"),
+    EntryRule("server_start", "backend", re.compile(r"\bhttp\.ListenAndServe(?:TLS)?\s*\(|\b\w+\.Run\s*\(\s*[\":]"), ("ListenAndServe", ".Run("), (".go",), "starts the web server"),
+    EntryRule("script_main", "cli", re.compile(r"^\s*fn\s+main\s*\(", re.M), ("fn main",), (".rs",), "Rust program entry point"),
+    EntryRule("script_main", "cli", re.compile(r"\bpublic\s+static\s+void\s+main\s*\(|^\s*fun\s+main\s*\(", re.M), ("static void main", "fun main"), (".java", ".kt"), "JVM program entry point"),
+    EntryRule("server_start", "backend", re.compile(r"\bSpringApplication\.run\s*\(|\bWebApplication\.CreateBuilder\s*\("), ("SpringApplication", "WebApplication"), (".java", ".kt", ".cs"), "starts the web application"),
+    EntryRule("ui_bootstrap", "frontend", re.compile(r"\brunApp\s*\("), ("runApp",), (".dart",), "starts the Flutter application"),
+)
+
+_TEST_PATH = re.compile(r"(?:^|/)(?:tests?|__tests__|spec|e2e)/|\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|/)test_[^/]+\.py$|_test\.(?:py|go)$|(?:^|/)conftest\.py$")
+
+
+@dataclass(frozen=True, slots=True)
+class EntryHit:
+    kind: str
+    area: str
+    line: int
+    why: str
+    text: str  # the matching line, trimmed
+
+
+def scannable_for_entrypoints(path: str) -> bool:
+    return not _SKIPPED_DIRS.search(path) and not _TEST_PATH.search(path) and any(path.endswith(e) for r in ENTRY_RULES for e in r.exts)
+
+
+def entry_markers() -> tuple[str, ...]:
+    """Every literal a start-up construct contains: a file with none of them has no entry point (SQL prefilter)."""
+    return tuple(dict.fromkeys(m for rule in ENTRY_RULES for m in rule.markers))
+
+
+def scan_entrypoints(path: str, content: str) -> list[EntryHit]:
+    """Start-up constructs in one source file, at most one hit per rule. Test files and vendored code yield none."""
+    if not scannable_for_entrypoints(path):
+        return []
+    hits: list[EntryHit] = []
+    for rule in ENTRY_RULES:
+        if not path.endswith(rule.exts) or not any(m in content for m in rule.markers):
+            continue
+        found = _find(content, rule.pattern, 1)
+        if found:
+            hits.append(EntryHit(rule.kind, rule.area, found[0][0], rule.why, found[0][1]))
+    return hits

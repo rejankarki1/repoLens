@@ -71,9 +71,29 @@ GROQ_GENERATION_MODEL=llama-3.3-70b-versatile
 
 Restart the API after changing `.env`. Default Groq model: `llama-3.3-70b-versatile` (production, 131k context, no reasoning output to manage). `openai/gpt-oss-120b` also works (set `GROQ_REASONING_EFFORT=low`), but Groq's published limit for it is 8K tokens per minute, so also lower `RAG_CONTEXT_MAX_CHARS` (for example 12000). A 413 from Groq means the prompt alone exceeds the model's limit; lower `RAG_CONTEXT_MAX_CHARS` or pick another model. Groq reuses the `GEMINI_GENERATION_TIMEOUT_SECONDS`, `..._DEADLINE_SECONDS`, `..._TEMPERATURE` and `..._MAX_OUTPUT_TOKENS` settings.
 
+## Repository-structure questions
+
+Questions such as "where is the entry point?", "how does the app start?" or "how is the project organised?"
+name no symbol, so search alone finds the wrong files (or none). For these questions only
+(`services/structure.py::is_structural_question`), retrieval first *discovers* evidence and adds it to the
+search results:
+
+- start-up constructs found in the code itself (`architecture/signals.py::scan_entrypoints`: a listening server,
+  a UI mount, a script guard, a `main` function, in JS/TS, Python, Go, Rust, JVM, Dart), never by file name;
+- start targets declared by manifests (package.json `main`/`bin`/start-like scripts, following `--prefix`,
+  pyproject scripts, Procfile, Dockerfile `CMD`, `index.html` module scripts), kept only if the file exists;
+- one hop of local imports from the best two entry points (the existing import extractor and resolver).
+
+Each item is mapped to the stored chunk that contains it, so it is cited like any other source (`[S#]`, real
+path, lines, commit). A short "Repository map" (layout, manifests, declared stack, entry points, and every
+gap or discrepancy such as a `main` that points at a missing file) is added to the prompt; it is delimited
+like an excerpt, labelled non-citable, and capped. Budget: at most `RAG_STRUCTURE_CHUNKS` structural
+chunks and `RAG_STRUCTURE_EXTRA_CHUNKS` more chunks than usual, with the same character cap. If discovery
+fails the question is answered from search alone, with a warning.
+
 ## Configuration
 
-`GEMINI_API_KEY` is shared with embeddings and sent only in the `x-goog-api-key` header. Optional: `GEMINI_GENERATION_MODEL`, `GEMINI_GENERATION_TIMEOUT_SECONDS`, `GEMINI_GENERATION_DEADLINE_SECONDS`, `GEMINI_GENERATION_TEMPERATURE`, `GEMINI_GENERATION_MAX_OUTPUT_TOKENS`, `GEMINI_THINKING_BUDGET`, `RAG_CONTEXT_CHUNKS`, `RAG_CONTEXT_MAX_CHARS`, `RAG_HISTORY_MESSAGES`, `RAG_HISTORY_MAX_CHARS`, `RAG_QUESTION_MAX_CHARS`.
+`GEMINI_API_KEY` is shared with embeddings and sent only in the `x-goog-api-key` header. Optional: `GEMINI_GENERATION_MODEL`, `GEMINI_GENERATION_TIMEOUT_SECONDS`, `GEMINI_GENERATION_DEADLINE_SECONDS`, `GEMINI_GENERATION_TEMPERATURE`, `GEMINI_GENERATION_MAX_OUTPUT_TOKENS`, `GEMINI_THINKING_BUDGET`, `RAG_CONTEXT_CHUNKS`, `RAG_CONTEXT_MAX_CHARS`, `RAG_STRUCTURE_CHUNKS`, `RAG_STRUCTURE_EXTRA_CHUNKS`, `RAG_STRUCTURE_SCAN_LIMIT`, `RAG_HISTORY_MESSAGES`, `RAG_HISTORY_MAX_CHARS`, `RAG_QUESTION_MAX_CHARS`.
 
 ## Database
 

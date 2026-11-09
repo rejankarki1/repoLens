@@ -169,6 +169,9 @@ class Settings(BaseSettings):
     gemini_thinking_budget: int | None = 0
     rag_context_chunks: int = 8  # most source excerpts sent with a question
     rag_context_max_chars: int = 24_000  # and the most code characters across them
+    rag_structure_chunks: int = 6  # most entry-point/manifest/dependency excerpts added for a structural question
+    rag_structure_extra_chunks: int = 2  # how far such a question may exceed rag_context_chunks (the character cap is unchanged)
+    rag_structure_scan_limit: int = 400  # most source files examined for start-up constructs
     rag_history_messages: int = 6  # most recent conversation messages sent as follow-up context
     rag_history_max_chars: int = 2_000  # per history message
     rag_question_max_chars: int = 2_000
