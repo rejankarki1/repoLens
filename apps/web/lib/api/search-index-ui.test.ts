@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { resumeIndexingAction } from './search-index-ui.ts'
+import { describeIndex, resumeIndexingAction } from './search-index-ui.ts'
 import type { ApiSearchIndex } from './chat.ts'
 
 function index(over: Partial<ApiSearchIndex>): ApiSearchIndex {
@@ -49,4 +49,36 @@ test('a job is running even while technically "not_built" yet (first attempt in 
     resumeIndexingAction(index({ semantic: 'not_built', embedding_job_running: true })),
     { visible: true, disabled: true, label: 'Indexing…' },
   )
+})
+
+// --- describeIndex: the "nothing appears above the question box" regression -----------------------------
+
+test('regression: a fully indexed repository still shows a status line (it used to render nothing at all)', () => {
+  assert.equal(describeIndex(index({ semantic: 'ready', embedded_chunks: 200, chunks: 200 })), 'Semantic index ready (200 chunks).')
+})
+
+test('regression: every loaded state with chunks shows a status line, a button, or both - never nothing', () => {
+  for (const semantic of ['disabled', 'not_built', 'partial', 'ready'] as const) {
+    for (const embedding_job_running of [false, true]) {
+      const loaded = index({ semantic, embedding_job_running, embedded_chunks: semantic === 'ready' ? 200 : 64 })
+      assert.ok(
+        describeIndex(loaded) !== null || resumeIndexingAction(loaded).visible,
+        `semantic=${semantic} running=${embedding_job_running} rendered nothing`,
+      )
+    }
+  }
+})
+
+test('partial status shows embedded/total progress, and says when a job is running', () => {
+  assert.match(describeIndex(index({ semantic: 'partial', embedded_chunks: 64 })) ?? '', /64 of 200 chunks\. /)
+  assert.match(describeIndex(index({ semantic: 'partial', embedded_chunks: 64, embedding_job_running: true })) ?? '', /64 of 200 chunks \(indexing…\)/)
+})
+
+test('a first build in progress is described as building, not as "not built yet"', () => {
+  assert.match(describeIndex(index({ semantic: 'not_built', embedding_job_running: true })) ?? '', /^Building the semantic index/)
+})
+
+test('nothing to describe before the status loads or when there are no chunks', () => {
+  assert.equal(describeIndex(undefined), null)
+  assert.equal(describeIndex(index({ chunks: 0, semantic: 'not_built' })), null)
 })

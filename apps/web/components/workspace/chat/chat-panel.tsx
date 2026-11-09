@@ -26,7 +26,7 @@ import {
 } from '@/lib/api/chat'
 import { ApiError } from '@/lib/api/client'
 import { useConversations, useSearchIndex } from '@/lib/api/hooks'
-import { resumeIndexingAction } from '@/lib/api/search-index-ui'
+import { describeIndex, resumeIndexingAction } from '@/lib/api/search-index-ui'
 import { makeTitle } from '@/lib/chat-title'
 import type { Repository } from '@/lib/types'
 import { useMediaQuery } from '@/lib/use-media-query'
@@ -69,7 +69,7 @@ export function ChatPanel(props: ChatPanelProps) {
 function MemberChatPanel({ repo, initialConversationId = null }: ChatPanelProps) {
   const { mutate } = useSWRConfig()
   const { data: history, error: historyError, isLoading: historyLoading } = useConversations(repo.id)
-  const { data: index, mutate: refreshIndex } = useSearchIndex(repo)
+  const { data: index, error: indexError, mutate: refreshIndex } = useSearchIndex(repo)
   const [resuming, setResuming] = useState(false)
   const [resumeError, setResumeError] = useState<string | null>(null)
 
@@ -329,7 +329,11 @@ function MemberChatPanel({ repo, initialConversationId = null }: ChatPanelProps)
   const last = messages[messages.length - 1]
   const retryable = last?.role === 'assistant' && (last.status === 'failed' || last.status === 'stopped') && !busy
   const retry = retryable ? () => void send(messages[messages.length - 2]?.content ?? '', { dropLastTurn: true }) : undefined
-  const indexNote = describeIndex(index)
+  // A failed status fetch used to leave `index` undefined and render nothing at all; say so instead (only when
+  // there is no earlier result to keep showing - SWR keeps the last good data across a failed revalidation).
+  const indexNote =
+    describeIndex(index) ??
+    (indexError && !index ? `Could not check the semantic index status (${messageOf(indexError, 'request failed')}). It will retry automatically.` : null)
   const resumeAction = resumeIndexingAction(index)
 
   const list = (
@@ -498,19 +502,6 @@ function MemberChatPanel({ repo, initialConversationId = null }: ChatPanelProps)
   )
 }
 
-function describeIndex(index: ReturnType<typeof useSearchIndex>['data']): string | null {
-  if (!index || index.chunks === 0) return null
-  switch (index.semantic) {
-    case 'disabled':
-      return 'Semantic search is not configured, so answers use keyword matching.'
-    case 'not_built':
-      return 'The semantic index has not been built yet. Answers use keyword matching, which works best with exact names.'
-    case 'partial':
-      return `Semantic index ${index.embedded_chunks} of ${index.chunks} chunks. Questions still work and use keyword matching for the rest.`
-    default:
-      return null
-  }
-}
 
 function Note({ children, tone }: { children: React.ReactNode; tone?: 'warning' }) {
   return (

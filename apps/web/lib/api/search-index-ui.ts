@@ -8,6 +8,26 @@
 
 import type { ApiSearchIndex } from './chat'
 
+/** The one-line status shown above the question box. Every loaded state with chunks gets a line, including
+ * `ready` - leaving `ready` blank made a finished index indistinguishable from a status that never loaded. */
+export function describeIndex(index: ApiSearchIndex | undefined): string | null {
+  if (!index || index.chunks === 0) return null
+  switch (index.semantic) {
+    case 'disabled':
+      return 'Semantic search is not configured, so answers use keyword matching.'
+    case 'not_built':
+      return index.embedding_job_running
+        ? 'Building the semantic index… Answers use keyword matching until it is ready.'
+        : 'The semantic index has not been built yet. Answers use keyword matching, which works best with exact names.'
+    case 'partial':
+      return `Semantic index ${index.embedded_chunks} of ${index.chunks} chunks${index.embedding_job_running ? ' (indexing…)' : ''}. Questions still work and use keyword matching for the rest.`
+    case 'ready':
+      return `Semantic index ready (${index.chunks} chunks).`
+    default:
+      return null
+  }
+}
+
 export type ResumeIndexingAction =
   | { visible: false }
   | { visible: true; disabled: boolean; label: string }
