@@ -297,6 +297,38 @@ def _is_manifest_like(path: str) -> bool:
     return base in ("package.json", "pyproject.toml", "Procfile") or base.startswith("Dockerfile") or path.endswith(".html")
 
 
+_NEXT_FILES = (
+    "app/layout", "app/page", "pages/_app", "pages/index", "middleware", "next.config",
+)
+_NEXT_EXTENSIONS = (".tsx", ".ts", ".jsx", ".js", ".mjs")
+
+
+def _next_entries(paths: set[str], manifest_texts: dict[str, str]) -> list[tuple[str, int, str, str]]:
+    """Next.js has no `listen()` or `createRoot()` in the repository: the framework starts from conventional files.
+    For each package that depends on `next` (or has a `next.config.*`), return the root layout, the home page, the
+    pages-router app, the middleware and the config that exist, as (path, line, declared_by, detail)."""
+    found: list[tuple[str, int, str, str]] = []
+    for manifest, text in sorted(manifest_texts.items()):
+        try:
+            data = json.loads(text)
+        except ValueError:
+            continue
+        base = posixpath.dirname(manifest)
+        deps = {**(data.get("dependencies") or {}), **(data.get("devDependencies") or {})} if isinstance(data, dict) else {}
+        has_config = any(_join(base, f"next.config{ext}") in paths for ext in _NEXT_EXTENSIONS)
+        if "next" not in deps and not has_config:
+            continue
+        line = _line_of(text, '"next"')
+        for root in (base, _join(base, "src")):
+            for stem in _NEXT_FILES:
+                for ext in _NEXT_EXTENSIONS:
+                    candidate = _join(root, stem + ext)
+                    if candidate in paths:
+                        found.append((candidate, line, f"{manifest}: dependencies.next", f"Next.js convention: {stem}"))
+                        break
+    return found
+
+
 def discover(paths: set[str], contents: dict[str, str]) -> Discovery:
     """Entry points of one snapshot from `contents` (the manifests and the candidate source files that were loaded).
 
@@ -339,6 +371,9 @@ def discover(paths: set[str], contents: dict[str, str]) -> Discovery:
             continue
         for target, line, declared_by, command in items:
             declared.append((target, line, declared_by, command, declared_by.split(":")[0]))
+
+    for target, line, declared_by, command in _next_entries(paths, manifest_texts):
+        declared.append((target, line, declared_by, command, declared_by.split(":")[0]))
 
     seen_mentions: set[tuple[str, int]] = set()
     for target, line, declared_by, command, manifest in declared:
