@@ -50,7 +50,7 @@ Migrations are not run on boot (Render Free has no pre-deploy command, and a web
 cd /path/to/repoLens
 DATABASE_URL='postgresql://…neon…?sslmode=require' REDIS_URL='redis://127.0.0.1:6379/15' \
   apps/api/venv/bin/alembic upgrade head
-DATABASE_URL='postgresql://…neon…?sslmode=require' apps/api/venv/bin/alembic current   # f1c4a7b9e820 (head)
+DATABASE_URL='postgresql://…neon…?sslmode=require' apps/api/venv/bin/alembic current   # a9e3c5d17b02 (head)
 ```
 
 (`REDIS_URL` is only there so nothing can reach your real queue; alembic does not use it.) Do not run `claim_local_data` on production. Local users, sessions and conversations are never copied.
@@ -109,7 +109,7 @@ Result: signed-out visitors can browse repositories, Code Explorer, architecture
 
 ## Updating an existing deployment
 
-This release needs **no database migration**: the Alembic head is still `f1c4a7b9e820`. Check that the production database is at that revision before deploying (from the repository root, with the real URL set only in your shell; paste Neon's string as shown, the app converts `sslmode` to asyncpg's `ssl`):
+This release adds one migration, `a9e3c5d17b02` (a new empty `showcase_answers` table; nothing existing is altered). It is additive, so the previous API keeps working against the migrated database, which makes this order safe: migrate, then deploy the API, then the web app. Check that production is at the previous revision first (from the repository root, with the real URL set only in your shell; paste Neon's string as shown, the app converts `sslmode` to asyncpg's `ssl`):
 
 ```bash
 DATABASE_URL='postgresql://…neon…?sslmode=require' REDIS_URL='redis://127.0.0.1:6379/15' \
@@ -117,10 +117,12 @@ DATABASE_URL='postgresql://…neon…?sslmode=require' REDIS_URL='redis://127.0.
 ```
 
 1. In Neon, create a branch of the production branch as a restore point.
-2. Confirm on Render: `EMBEDDING_MAX_CHUNKS_PER_REPOSITORY=3000`.
-3. Merge to `main`. Render has auto-deploy off: use *Manual Deploy → Deploy latest commit*. Vercel deploys from `main` on its own.
-4. Run the checklist above (health, sign-in, Ask AI with citations, Architecture tab, import status).
-5. Rollback: redeploy the previous commit in Render and Vercel. No schema change is involved.
+2. Migrate: the same command with `upgrade head`, then `current` again (expect `a9e3c5d17b02 (head)`).
+3. Confirm on Render: `EMBEDDING_MAX_CHUNKS_PER_REPOSITORY=3000`, and set `GUEST_SHOWCASE_REPOSITORIES` (see "Sample repositories").
+4. Merge to `main`. Render has auto-deploy off: use *Manual Deploy → Deploy latest commit*. Vercel deploys from `main` on its own.
+5. Run the checklist above (health, sign-in, Ask AI with citations, Architecture tab, import status, the landing page signed out, removing a repository you imported only for the test).
+6. Publish the example answers (see "Sample repositories").
+7. Rollback: redeploy the previous commit in Render and Vercel. The extra table is harmless to the old code; `alembic downgrade f1c4a7b9e820` drops it (and any published answers) if you want it gone.
 
 ## Limitations and unverified assumptions
 
