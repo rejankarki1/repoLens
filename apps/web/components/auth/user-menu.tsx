@@ -2,11 +2,22 @@
 
 import Image from 'next/image'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { Loader2, LogOut } from 'lucide-react'
+import { ChevronsUpDown, ExternalLink, LogOut, Moon, Sun } from 'lucide-react'
+import { useTheme } from 'next-themes'
 import { Suspense, useEffect, useState } from 'react'
 import { GitHubSignIn } from '@/components/auth/github-sign-in'
 import { ThemeToggle } from '@/components/theme-toggle'
-import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { authErrorMessage } from '@/lib/auth/import-resume'
 import { useAuth } from '@/lib/auth/use-auth'
 
@@ -30,9 +41,10 @@ function GuestSignInError() {
   )
 }
 
-/** Bottom of the sidebar: who is signed in with a sign-out action, or Continue with GitHub for a visitor. */
+/** Bottom of the sidebar: a compact profile menu (profile, theme, sign out) or, for a visitor, Continue with GitHub. */
 export function UserMenu() {
   const { user, authenticated, loading, signOut } = useAuth()
+  const { resolvedTheme, setTheme } = useTheme()
   const pathname = usePathname()
   const [leaving, setLeaving] = useState(false)
 
@@ -51,9 +63,9 @@ export function UserMenu() {
         <Suspense fallback={null}>
           <GuestSignInError />
         </Suspense>
-        <p className="text-xs text-muted-foreground">Browsing as a guest. Sign in to analyze repositories and ask questions.</p>
+        <p className="text-xs text-muted-foreground">Browsing the demo. Sign in to analyze your own repositories and ask questions.</p>
         <div className="flex items-center gap-2">
-          <GitHubSignIn next={pathname === '/' ? '/repositories' : pathname} size="sm" className="flex-1" />
+          <GitHubSignIn next={pathname === '/' ? '/dashboard' : pathname} size="sm" className="flex-1" />
           <ThemeToggle />
         </div>
       </div>
@@ -62,34 +74,63 @@ export function UserMenu() {
 
   const display = user.name || user.login
   return (
-    <div className="flex items-center gap-3 border-t border-sidebar-border px-3 py-3">
-      {user.avatar_url ? (
-        <Image src={user.avatar_url} alt="" width={32} height={32} unoptimized className="size-8 shrink-0 rounded-full bg-muted" />
-      ) : (
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary" aria-hidden="true">
-          {user.login.slice(0, 2).toUpperCase()}
-        </div>
-      )}
-      <div className="min-w-0 flex-1 overflow-hidden">
-        <p className="truncate text-sm font-medium leading-5" title={display}>{display}</p>
-        <p className="truncate text-xs leading-4 text-muted-foreground">@{user.login}</p>
-      </div>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        className="shrink-0"
-        aria-label="Sign out"
-        title="Sign out"
-        disabled={leaving}
-        onClick={async () => {
-          setLeaving(true)
-          await signOut()
-          setLeaving(false)
-        }}
-      >
-        {leaving ? <Loader2 className="animate-spin" aria-hidden="true" /> : <LogOut aria-hidden="true" />}
-      </Button>
-      <ThemeToggle />
+    <div className="border-t border-sidebar-border p-2">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label={`Account menu for ${display}`}
+          className="flex w-full items-center gap-2.5 rounded-md p-1.5 text-left outline-none transition-colors hover:bg-sidebar-accent/60 focus-visible:ring-3 focus-visible:ring-ring/40 aria-expanded:bg-sidebar-accent/60"
+        >
+          {user.avatar_url ? (
+            <Image src={user.avatar_url} alt="" width={28} height={28} unoptimized className="size-7 shrink-0 rounded-full bg-muted" />
+          ) : (
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary" aria-hidden="true">
+              {user.login.slice(0, 2).toUpperCase()}
+            </span>
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium leading-5" title={display}>
+              {display}
+            </span>
+            <span className="block truncate text-xs leading-4 text-muted-foreground">@{user.login}</span>
+          </span>
+          <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start" className="min-w-52">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Signed in as @{user.login}</DropdownMenuLabel>
+            <DropdownMenuItem render={<a href={`https://github.com/${encodeURIComponent(user.login)}`} target="_blank" rel="noreferrer" />}>
+              <ExternalLink aria-hidden="true" />
+              GitHub profile
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Theme</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={resolvedTheme ?? 'dark'} onValueChange={(value) => setTheme(String(value))}>
+              <DropdownMenuRadioItem value="light">
+                <Sun aria-hidden="true" />
+                Light
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="dark">
+                <Moon aria-hidden="true" />
+                Dark
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={leaving}
+            onClick={async () => {
+              setLeaving(true)
+              await signOut()
+              setLeaving(false)
+            }}
+          >
+            <LogOut aria-hidden="true" />
+            {leaving ? 'Signing out…' : 'Sign out'}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }

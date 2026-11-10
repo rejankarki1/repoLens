@@ -2,55 +2,82 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { FolderGit2, LayoutDashboard, Menu, Settings } from 'lucide-react'
+import { AlertCircle, FolderGit2, LayoutDashboard, Loader2, Menu } from 'lucide-react'
 import { RepoLensLogo } from '@/components/icons'
 import { UserMenu } from '@/components/auth/user-menu'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
+import { useRepositories } from '@/lib/api/hooks'
+import { useAuth } from '@/lib/auth/use-auth'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, match: (p: string) => p === '/dashboard' },
-  {
-    href: '/repositories',
-    label: 'Repositories',
-    icon: FolderGit2,
-    match: (p: string) => p.startsWith('/repositories') || p.startsWith('/repos/'),
-  },
-  { href: '/settings', label: 'Settings', icon: Settings, match: (p: string) => p.startsWith('/settings') },
+  { href: '/repositories', label: 'Repositories', icon: FolderGit2, match: (p: string) => p.startsWith('/repositories') },
 ]
+
+const LINK =
+  'flex h-8 items-center gap-2.5 rounded-md px-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40'
+const ACTIVE = 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
+const IDLE = 'text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground'
+
+/** The newest repositories, from the list the other screens already load (no extra request). A visitor sees the demo set. */
+function RecentRepositories() {
+  const pathname = usePathname()
+  const { authenticated, loading } = useAuth()
+  const { data } = useRepositories()
+  const repositories = (data ?? []).slice(0, 5)
+  if (loading || repositories.length === 0) return null
+
+  return (
+    <nav aria-label={authenticated ? 'Recent repositories' : 'Demo repositories'} className="flex flex-col gap-0.5 px-2 pb-2">
+      <p className="px-2.5 pb-1 text-xs font-medium text-muted-foreground">{authenticated ? 'Recent' : 'Demo'}</p>
+      {repositories.map((repo) => {
+        const active = pathname === `/repos/${repo.id}` || pathname.startsWith(`/repos/${repo.id}/`)
+        const working = repo.status === 'queued' || repo.status === 'importing' || repo.status === 'indexing'
+        return (
+          <Link
+            key={repo.id}
+            href={`/repos/${repo.id}`}
+            title={repo.fullName}
+            aria-current={active ? 'page' : undefined}
+            className={cn(LINK, 'h-7 text-[0.8125rem]', active ? ACTIVE : IDLE)}
+          >
+            <span className="min-w-0 flex-1 truncate">{repo.name}</span>
+            {working && <Loader2 className="size-3.5 shrink-0 animate-spin text-warning" aria-label="Ingesting" />}
+            {repo.status === 'failed' && <AlertCircle className="size-3.5 shrink-0 text-destructive" aria-label="Ingestion failed" />}
+          </Link>
+        )
+      })}
+    </nav>
+  )
+}
 
 function SidebarContents() {
   const pathname = usePathname()
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-14 items-center gap-2.5 px-4">
+      <Link href="/" className="flex h-14 items-center gap-2.5 px-4 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40">
         <RepoLensLogo className="size-6" />
         <span className="text-sm font-semibold tracking-tight">RepoLens</span>
-      </div>
+      </Link>
 
-      <nav aria-label="Main" className="flex flex-1 flex-col gap-0.5 px-2 py-2">
+      <nav aria-label="Main" className="flex flex-col gap-0.5 px-2 py-2">
         {NAV_ITEMS.map(({ href, label, icon: Icon, match }) => {
           const active = match(pathname)
           return (
-            <Link
-              key={href}
-              href={href}
-              aria-current={active ? 'page' : undefined}
-              className={cn(
-                'flex h-8 items-center gap-2.5 rounded-md px-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40',
-                active
-                  ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
-                  : 'text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground',
-              )}
-            >
+            <Link key={href} href={href} aria-current={active ? 'page' : undefined} className={cn(LINK, active ? ACTIVE : IDLE)}>
               <Icon className="size-4" aria-hidden="true" />
               {label}
             </Link>
           )
         })}
       </nav>
+
+      <div className="min-h-0 flex-1 overflow-y-auto pt-2">
+        <RecentRepositories />
+      </div>
 
       <UserMenu />
     </div>
