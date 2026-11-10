@@ -21,14 +21,18 @@ async function signInAs(user) {
 async function waitIngested() {
   return d.waitFor(`/Ingested/.test(document.body.innerText) && /Files\\s+\\d+/.test(document.body.innerText)`, 60000)
 }
+async function signOut() {
+  await d.clickOn('button[aria-label^="Account menu"]'); await d.sleep(500)
+  await d.clickOn(`(()=>[...document.querySelectorAll('[role=menuitem]')].find(e=>/Sign out/.test(e.innerText)))()`)
+}
 const links = (d) => d.ev(`[...document.querySelectorAll('a')].map(a=>a.getAttribute('href'))`)
 
 try {
   // 1. A visitor: guest sidebar, nothing imported, sign-in offered.
   await d.goto(`${WEB}/repositories`, 2500)
   let page = await text(d)
-  check('visitor sees the guest sidebar with Continue with GitHub', /Browsing as a guest/.test(page) && /Continue with GitHub/.test(page))
-  check('visitor has no repositories yet (empty showcase)', /No showcase repositories are available yet|No repositories yet/.test(page))
+  check('visitor sees the guest sidebar with Continue with GitHub', /Browsing the demo/.test(page) && /Continue with GitHub/.test(page))
+  check('visitor has no repositories yet (empty showcase)', /No demo repositories yet/.test(page))
 
   // 2. Paste a URL as a visitor: sign-in prompt, nothing is imported.
   await paste('https://github.com/octo/demo')
@@ -54,8 +58,8 @@ try {
   check('a signed-in member can paste another repository and gets its workspace', await d.waitFor(`/^\\/repos\\/\\d+$/.test(location.pathname) && location.pathname !== '${repoPath}'`, 30000))
   const privatePath = await d.ev('location.pathname')
   check('the second repository is ingested too', await waitIngested())
-  await d.clickOn('button[aria-label="Sign out"]'); await d.sleep(1500)
-  check('signing out returns to the guest view', /Browsing as a guest/.test(await text(d)))
+  await signOut(); await d.sleep(1500)
+  check('signing out returns to the guest view', /Browsing the demo/.test(await text(d)))
   check('the session cookie is gone after sign out', (await d.cookies(API)).every((c) => c.name !== 'rl_session'))
   await signInAs('bob')
   await d.goto(`${WEB}${privatePath}`, 2500)
@@ -63,17 +67,17 @@ try {
   check("another user's own repository list is empty (the showcase is not their workspace)", (await d.ev(`fetch('${API}/repositories',{credentials:'include'}).then(r=>r.json())`)).length === 0)
 
   // 5. Cancelling on GitHub changes nothing.
-  await d.clickOn('button[aria-label="Sign out"]'); await d.sleep(1200)
+  await signOut(); await d.sleep(1200)
   await control({ mode: 'deny' })
   await d.goto(`${API}/auth/github/login?next=%2Frepositories`, 0)
   await d.waitFor(`location.origin === '${WEB}'`); await d.sleep(2000)
-  check('cancelling GitHub sign-in shows a clear message and stays signed out', /sign-in was cancelled/i.test(await text(d)) && /Browsing as a guest/.test(await text(d)))
+  check('cancelling GitHub sign-in shows a clear message and stays signed out', /sign-in was cancelled/i.test(await text(d)) && /Browsing the demo/.test(await text(d)))
   await control({ mode: 'approve' })
 
   // 6. The guest showcase: add the repository to the allow-list is done by configuration (E2E_SHOWCASE), so a visitor can browse it read-only.
   await d.goto(`${WEB}/repositories`, 2500)
   page = await text(d)
-  check('the showcase repository is listed for visitors', /octo\/demo/.test(page) && /browsing the showcase/i.test(page))
+  check('the showcase repository is listed for visitors', /octo\/demo/.test(page) && /browsing the demo/i.test(page))
   await d.goto(`${WEB}${repoPath}`, 2500)
   page = await text(d)
   check('a visitor can open the showcase read-only (badge, no Re-analyze)', /Showcase · read-only/.test(page) && !/Re-analyze/.test(page))
@@ -88,6 +92,26 @@ try {
     chats: await s('/repositories/${id}/conversations'), search: await s('/repositories/${id}/search?q=hash'), files: await s('/repositories/${id}/files') }})()`)
   check('a visitor cannot import, re-ingest, analyze, search or read conversations (401), but can read files',
     guestApi.import === 401 && guestApi.ingest === 401 && guestApi.analyze === 401 && guestApi.chats === 401 && guestApi.search === 401 && guestApi.files === 200, JSON.stringify(guestApi))
+
+  // 7. Removing repositories: a confirmation, clear feedback, GitHub untouched; a showcase repository stays browsable.
+  await signInAs('alice')
+  await d.goto(`${WEB}/repositories`, 2500)
+  page = await text(d)
+  check('the repository list offers Open, Re-analyze and Remove', /octo\/second/.test(page) && /Re-analyze/.test(page) && !!(await d.ev(`document.querySelector('button[aria-label="Remove octo/second"]')`)))
+  const dialog = () => d.ev(`document.querySelector('[role=alertdialog]')?.innerText ?? ''`)
+  const press = (label) => d.clickOn(`(()=>[...document.querySelectorAll('[role=alertdialog] button')].find(b=>/^${label}$/.test(b.innerText.trim())))()`)
+  await d.clickOn('button[aria-label="Remove octo/second"]'); await d.sleep(700)
+  check('removal asks for confirmation and says GitHub is not affected', /Remove octo\/second\?/.test(await dialog()) && /not affected/.test(await dialog()))
+  await press('Cancel'); await d.sleep(700)
+  check('cancelling removes nothing', /octo\/second/.test(await text(d)) && (await d.ev(`fetch('${API}/repositories/${privatePath.split('/').pop()}',{credentials:'include'}).then(r=>r.status)`)) === 200)
+  await d.clickOn('button[aria-label="Remove octo/second"]'); await d.sleep(700)
+  await press('Remove repository'); await d.sleep(1500)
+  check('confirming removes it and reports success', /Removed octo\/second from your repositories/.test(await text(d)) && !(await d.ev(`!!document.querySelector('button[aria-label="Remove octo/second"]')`)))
+  check('its stored data is gone (it was in nobody else\'s workspace)', (await d.ev(`fetch('${API}/repositories/${privatePath.split('/').pop()}',{credentials:'include'}).then(r=>r.status)`)) === 404)
+  await d.clickOn('button[aria-label="Remove octo/demo"]'); await d.sleep(700)
+  await press('Remove repository'); await d.sleep(1500)
+  await signOut(); await d.sleep(1200)
+  check('a removed showcase repository is still open to visitors', (await d.ev(`fetch('${API}/repositories/${id}/files').then(r=>r.status)`)) === 200)
 
   check('no uncaught page errors during the whole run', d.problems.length === 0, d.problems.slice(0, 3).join(' | '))
 } catch (error) {
