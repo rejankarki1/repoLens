@@ -106,6 +106,21 @@ Result: signed-out visitors can browse repositories, Code Explorer, architecture
 9. Import a small public repository: status goes queued → in progress → completed (worker working). Sign out works (CSRF).
 10. Render logs show no `Unsafe production configuration` and show `rq.worker` lines.
 
+## Updating an existing deployment
+
+This release needs **no database migration**: the Alembic head is still `f1c4a7b9e820`. Check that the production database is at that revision before deploying (from the repository root, with the real URL set only in your shell; paste Neon's string as shown, the app converts `sslmode` to asyncpg's `ssl`):
+
+```bash
+DATABASE_URL='postgresql://…neon…?sslmode=require' REDIS_URL='redis://127.0.0.1:6379/15' \
+  apps/api/venv/bin/alembic -c alembic.ini current      # expect f1c4a7b9e820 (head)
+```
+
+1. In Neon, create a branch of the production branch as a restore point.
+2. Confirm on Render: `EMBEDDING_MAX_CHUNKS_PER_REPOSITORY=3000`.
+3. Merge to `main`. Render has auto-deploy off: use *Manual Deploy → Deploy latest commit*. Vercel deploys from `main` on its own.
+4. Run the checklist above (health, sign-in, Ask AI with citations, Architecture tab, import status).
+5. Rollback: redeploy the previous commit in Render and Vercel. No schema change is involved.
+
 ## Limitations and unverified assumptions
 
 - **Verified locally** (Docker, throwaway Postgres+pgvector and Redis): the image builds; migrations run on an empty pgvector database; `/health` and `/health/ready` respond; two real ingestions (itsdangerous, flask: 223 files) completed with API + worker under a hard 512 MB limit, peak ≈ 200 MiB, no OOM kill; `docker stop` stops both processes in ~1 s with exit 0; a dying child takes the service down visibly. The Next.js rewrite was checked with `next start` against a stub: redirects, `Set-Cookie` and an SSE stream pass through incrementally.

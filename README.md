@@ -2,7 +2,7 @@
 
 repoLens is an AI-powered repository intelligence tool for public GitHub repositories. It ingests a repository, makes its code searchable, lets you ask questions that are answered from the code with citations to the exact files and lines, and maps how the modules depend on each other.
 
-> **Project status:** a working application with GitHub sign-in, per-user workspaces and usage limits. It is not deployed. Real GitHub OAuth has not yet been exercised end to end (tests use a fake GitHub), so treat it as unverified until you have configured an OAuth App. See [docs/release-baseline.md](docs/release-baseline.md) for what exists, what was verified, and what remains.
+> **Hosting:** Vercel (web app), Render (API and worker), Neon (PostgreSQL), Redis for the job queue. See [docs/deployment.md](docs/deployment.md) for the production steps and [docs/release-baseline.md](docs/release-baseline.md) for what was verified.
 
 ## What it does
 
@@ -114,6 +114,23 @@ Open `http://localhost:3000` (use `localhost`, not `127.0.0.1`: the session cook
 So while `.env.oauth-check` exists, every plain command uses the isolated database, Redis database 8 and the `oauth_check` queue, and the AI keys come from `.env`. To work against your real development resources, move `.env.oauth-check` aside. Put AI keys in `.env` only. A variable exported in your shell still beats both files, so if the wrong database or queue appears, check `env | grep -E 'DATABASE_URL|REDIS_URL|INGESTION|GEMINI|GROQ|GITHUB'` and `unset` the stray ones.
 
 Do not use the `oauth-check` overlay in production: set the real values through the production secret store (see `docs/security.md`).
+
+## Health check and troubleshooting
+
+```bash
+curl -s localhost:8765/health/ready     # {"status":"ready","checks":{"database":"ok","redis":"ok"}}
+docker compose ps                        # postgres and redis should be "running"
+```
+
+| Symptom | Fix |
+| --- | --- |
+| `ConnectionRefusedError` on `127.0.0.1:5433` or `6379` | Docker is not running or the containers are stopped: start Docker Desktop, then `docker compose up -d`. If `docker` itself hangs, quit and reopen Docker Desktop. |
+| `port is already allocated` | Another service uses 5433, 6379, 8765 or 3000. Stop it, or change the port in `.env` (and `DATABASE_URL` / `REDIS_URL` with it). |
+| `No script_location` from Alembic | Run it from the repository root (`alembic.ini` has a relative path), as `apps/api/venv/bin/alembic upgrade head`. |
+| `password authentication failed` | `DATABASE_URL` does not match `POSTGRES_USER` / `POSTGRES_PASSWORD` in `.env`. A volume created with an older password keeps it; change `.env` back, or recreate the volume only if you accept losing local data. |
+| Jobs stay "queued" | The worker is not running, or it listens on another queue: `apps/api/venv/bin/python -m apps.api.worker`, and check `INGESTION_QUEUE_NAME` matches the API. |
+| Sign-in loops or the session is lost | Open the app at `http://localhost:3000`, not `127.0.0.1`. |
+| Indexing stuck at "embedding" | Use **Resume Indexing** in the chat panel. Gemini's free tier rate-limits embeddings; it continues where it stopped. |
 
 ## Tests
 
