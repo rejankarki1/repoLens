@@ -96,8 +96,9 @@ try {
   // 7. Removing repositories: a confirmation, clear feedback, GitHub untouched; a showcase repository stays browsable.
   await signInAs('alice')
   await d.goto(`${WEB}/repositories`, 2500)
+  await d.waitFor(`!!document.querySelector('button[aria-label="Remove octo/second"]')`, 20000)
   page = await text(d)
-  check('the repository list offers Open, Re-analyze and Remove', /octo\/second/.test(page) && /Re-analyze/.test(page) && !!(await d.ev(`document.querySelector('button[aria-label="Remove octo/second"]')`)))
+  check('the repository list offers Open, Re-analyze and Remove', /octo\/second/.test(page) && /Re-analyze/.test(page) && (await d.ev(`!!document.querySelector('button[aria-label="Remove octo/second"]')`)))
   const dialog = () => d.ev(`document.querySelector('[role=alertdialog]')?.innerText ?? ''`)
   const press = (label) => d.clickOn(`(()=>[...document.querySelectorAll('[role=alertdialog] button')].find(b=>/^${label}$/.test(b.innerText.trim())))()`)
   await d.clickOn('button[aria-label="Remove octo/second"]'); await d.sleep(700)
@@ -115,7 +116,7 @@ try {
 
   check('no uncaught page errors during the whole run', d.problems.length === 0, d.problems.slice(0, 3).join(' | '))
 } catch (error) {
-  check('the smoke test ran to completion', false, String(error.message ?? error))
+  check('the smoke test ran to completion', false, String(error.stack ?? error).split('\n').slice(0, 4).join(' | '))
 } finally {
   d.close()
 }
