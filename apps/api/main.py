@@ -34,6 +34,7 @@ from apps.api.routes.files import router as files_router
 from apps.api.routes.ingestions import router as ingestions_router
 from apps.api.routes.repositories import router as repositories_router
 from apps.api.routes.search import router as search_router
+from apps.api.routes.showcase import router as showcase_router
 
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,7 @@ app.include_router(search_router)
 app.include_router(conversations_router)
 app.include_router(architecture_router)
 app.include_router(architecture_diagram_router)
+app.include_router(showcase_router)
 
 app.add_middleware(UnhandledErrorMiddleware)
 app.add_middleware(SecurityHeadersMiddleware, settings=settings)
