@@ -106,6 +106,7 @@ function toRepository(api: ApiRepository): Repository {
     // The backend reports no percentage; null renders an indeterminate bar.
     progress: null,
     error: api.ingestion_status === 'failed' ? api.ingestion_error : null,
+    truncated: api.ingestion_truncated,
     viewerAccess: api.viewer_access === 'guest' ? 'guest' : 'member',
   }
 }
@@ -130,6 +131,20 @@ export async function importRepository(githubUrl: string): Promise<Repository> {
       body: JSON.stringify({ github_url: githubUrl }),
     }),
   )
+}
+
+/**
+ * Removes a repository from the signed-in user's workspace (and their conversations about it). The stored copy is
+ * deleted only when nobody else uses it; the GitHub repository is never touched. Throws `ApiError` (409 while it is
+ * still being ingested).
+ */
+export async function removeRepository(id: string): Promise<{ dataDeleted: boolean }> {
+  try {
+    const body = await request<{ data_deleted: boolean }>(`/repositories/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    return { dataDeleted: body.data_deleted }
+  } finally {
+    void mutate('repositories')
+  }
 }
 
 /* ---------------------------------- Files ----------------------------------- */

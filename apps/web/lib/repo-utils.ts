@@ -1,4 +1,4 @@
-import type { FileTreeNode, SourceFile } from '@/lib/types'
+import type { FileTreeNode, Repository, SourceFile } from '@/lib/types'
 
 export function buildFileTree(files: Pick<SourceFile, 'path'>[]): FileTreeNode[] {
   const root: FileTreeNode = { name: '', path: '', type: 'directory', children: [] }
@@ -77,4 +77,15 @@ export const LANGUAGE_LABELS: Record<SourceFile['language'], string> = {
   markdown: 'Markdown',
   toml: 'TOML',
   text: 'Plain text',
+}
+
+/** Repositories whose `owner/name` contains the search text (case-insensitive); an empty search keeps them all. */
+export function filterRepositories<T extends { fullName: string }>(repositories: T[], search: string): T[] {
+  const q = search.trim().toLowerCase()
+  return q ? repositories.filter((r) => r.fullName.toLowerCase().includes(q)) : repositories
+}
+
+/** Whether the worker is (or will soon be) busy with this repository, so actions that start more work are off. */
+export function isIngesting(status: Repository['status']): boolean {
+  return status === 'queued' || status === 'importing' || status === 'indexing'
 }

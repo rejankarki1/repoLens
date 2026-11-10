@@ -1,23 +1,29 @@
+'use client'
+
 import Link from 'next/link'
-import { Code2, MessageSquareText, Network } from 'lucide-react'
+import { Code2, GitBranch, GitCommitHorizontal, MessageSquareText, Network, TriangleAlert } from 'lucide-react'
+import { IndexBadge } from '@/components/index-badge'
 import { IndexingProgressBar, IndexingStatus } from '@/components/indexing-status'
+import { useSearchIndex } from '@/lib/api/hooks'
 import { formatRelativeTime } from '@/lib/repo-utils'
 import type { Repository } from '@/lib/types'
 
 const ACTION =
-  'inline-flex items-center gap-1 rounded text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40'
-const ICON = 'size-3.5 opacity-80'
+  'inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40'
 
 /**
- * `recent` (Dashboard) adds a quiet row of workspace shortcuts for ingested repositories. Failures show one short
- * line; the full error lives in the repository's own workspace.
+ * A dashboard card built only from what the API knows: ingestion status, branch, ingested commit and time, and (for
+ * your own repositories, without polling) the semantic-index state. The whole card opens the repository; the three
+ * actions go straight to a tab.
  */
-export function RepositoryCard({ repository, variant = 'library' }: { repository: Repository; variant?: 'recent' | 'library' }) {
-  const { id, owner, name, description, primaryLanguage, status, progress, lastAnalyzedAt, error, fullName } = repository
-  const failed = status === 'failed'
+export function RepositoryCard({ repository }: { repository: Repository }) {
+  const { id, owner, name, status, progress, lastAnalyzedAt, error, fullName, defaultBranch, indexedCommit, truncated, viewerAccess } = repository
+  const hasSnapshot = indexedCommit !== null
+  // The index status is member-only on the server; visitors browsing the demo would only get a refusal.
+  const { data: index } = useSearchIndex(viewerAccess === 'member' && status === 'completed' ? repository : undefined, { poll: false })
 
   return (
-    <li className="relative flex flex-col gap-2 rounded-lg border border-border bg-card px-4 py-3 transition focus-within:border-primary/40 hover:-translate-y-px hover:border-primary/40 hover:bg-accent/30 focus-within:bg-accent/30 motion-reduce:transition-none motion-reduce:hover:translate-y-0">
+    <li className="relative flex flex-col gap-2.5 rounded-lg border border-border bg-card px-4 py-3 transition focus-within:border-primary/40 hover:border-primary/40 hover:bg-accent/30 focus-within:bg-accent/30">
       <div className="flex items-center justify-between gap-3">
         <Link
           href={`/repos/${id}`}
@@ -32,35 +38,47 @@ export function RepositoryCard({ repository, variant = 'library' }: { repository
         <IndexingStatus status={status} progress={progress} className="shrink-0" />
       </div>
 
-      {description && <p className="line-clamp-1 text-sm text-muted-foreground">{description}</p>}
-
       <IndexingProgressBar status={status} progress={progress} />
 
-      <p className="truncate text-xs text-muted-foreground">
-        {failed && error ? (
-          <span className="text-destructive/70" title={error}>
-            {error}
+      {status === 'failed' && error ? (
+        <p className="line-clamp-2 text-xs text-destructive/80" title={error}>
+          {error}
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <GitBranch className="size-3.5" aria-hidden="true" />
+            <span className="font-mono">{defaultBranch}</span>
           </span>
-        ) : (
-          <>
-            {primaryLanguage !== 'Unknown' && <>{primaryLanguage} · </>}
-            {lastAnalyzedAt ? `Ingested ${formatRelativeTime(lastAnalyzedAt)}` : 'Not ingested yet'}
-          </>
-        )}
-      </p>
+          {indexedCommit && (
+            <span className="inline-flex items-center gap-1" title="Ingested commit">
+              <GitCommitHorizontal className="size-3.5" aria-hidden="true" />
+              <span className="font-mono">{indexedCommit}</span>
+            </span>
+          )}
+          <span>{lastAnalyzedAt ? `Ingested ${formatRelativeTime(lastAnalyzedAt)}` : 'Not ingested yet'}</span>
+          {truncated && (
+            <span className="inline-flex items-center gap-1 text-warning" title="The repository exceeded the ingestion limits, so only part of it is stored.">
+              <TriangleAlert className="size-3.5" aria-hidden="true" />
+              Partial snapshot
+            </span>
+          )}
+          <IndexBadge index={index} />
+        </div>
+      )}
 
-      {variant === 'recent' && status === 'completed' && (
-        <div className="relative z-10 flex gap-3">
-          <Link href={`/repos/${id}?tab=ask`} className={`${ACTION} !text-primary hover:!text-primary/80`}>
-            <MessageSquareText className={ICON} aria-hidden="true" />
+      {hasSnapshot && (
+        <div className="relative z-10 flex flex-wrap gap-2">
+          <Link href={`/repos/${id}?tab=ask`} className={ACTION}>
+            <MessageSquareText className="size-3.5" aria-hidden="true" />
             Ask AI
           </Link>
           <Link href={`/repos/${id}?tab=code`} className={ACTION}>
-            <Code2 className={ICON} aria-hidden="true" />
+            <Code2 className="size-3.5" aria-hidden="true" />
             Explore Code
           </Link>
           <Link href={`/repos/${id}/graph`} className={ACTION}>
-            <Network className={ICON} aria-hidden="true" />
+            <Network className="size-3.5" aria-hidden="true" />
             Architecture
           </Link>
         </div>
