@@ -5,7 +5,7 @@ import { useSWRConfig } from 'swr'
 import { ArrowUp, History, Info, Loader2, MessageSquarePlus, Square } from 'lucide-react'
 import { ChatMessageView } from '@/components/workspace/chat/chat-message'
 import { ConversationList } from '@/components/workspace/chat/conversation-list'
-import { AskRestricted } from '@/components/auth/access-prompt'
+import { ShowcaseAnswers } from '@/components/workspace/chat/showcase-answers'
 import { SourcePreview } from '@/components/workspace/chat/source-preview'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
@@ -60,9 +60,9 @@ function messageOf(err: unknown, fallback: string) {
 
 type ChatPanelProps = { repo: Repository; initialConversationId?: number | null }
 
-/** Ask AI belongs to workspace members: it spends the AI budget and keeps personal conversations. */
+/** Ask AI belongs to workspace members: it spends the AI budget and keeps personal conversations. Everyone else sees the saved examples. */
 export function ChatPanel(props: ChatPanelProps) {
-  if (props.repo.viewerAccess !== 'member') return <AskRestricted repo={props.repo} />
+  if (props.repo.viewerAccess !== 'member') return <ShowcaseAnswers repo={props.repo} />
   return <MemberChatPanel {...props} />
 }
 
