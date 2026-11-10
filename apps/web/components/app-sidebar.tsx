@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useState } from 'react'
 import { AlertCircle, FolderGit2, LayoutDashboard, Loader2, Menu } from 'lucide-react'
 import { RepoLensLogo } from '@/components/icons'
 import { UserMenu } from '@/components/auth/user-menu'
@@ -22,7 +23,7 @@ const ACTIVE = 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
 const IDLE = 'text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground'
 
 /** The newest repositories, from the list the other screens already load (no extra request). A visitor sees the demo set. */
-function RecentRepositories() {
+function RecentRepositories({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
   const { authenticated, loading } = useAuth()
   const { data } = useRepositories()
@@ -40,6 +41,7 @@ function RecentRepositories() {
             key={repo.id}
             href={`/repos/${repo.id}`}
             title={repo.fullName}
+            onClick={onNavigate}
             aria-current={active ? 'page' : undefined}
             className={cn(LINK, 'h-7 text-[0.8125rem]', active ? ACTIVE : IDLE)}
           >
@@ -53,12 +55,12 @@ function RecentRepositories() {
   )
 }
 
-function SidebarContents() {
+function SidebarContents({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
 
   return (
     <div className="flex h-full flex-col">
-      <Link href="/" className="flex h-14 items-center gap-2.5 px-4 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40">
+      <Link href="/" onClick={onNavigate} className="flex h-14 items-center gap-2.5 px-4 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40">
         <RepoLensLogo className="size-6" />
         <span className="text-sm font-semibold tracking-tight">RepoLens</span>
       </Link>
@@ -67,7 +69,7 @@ function SidebarContents() {
         {NAV_ITEMS.map(({ href, label, icon: Icon, match }) => {
           const active = match(pathname)
           return (
-            <Link key={href} href={href} aria-current={active ? 'page' : undefined} className={cn(LINK, active ? ACTIVE : IDLE)}>
+            <Link key={href} href={href} onClick={onNavigate} aria-current={active ? 'page' : undefined} className={cn(LINK, active ? ACTIVE : IDLE)}>
               <Icon className="size-4" aria-hidden="true" />
               {label}
             </Link>
@@ -76,7 +78,7 @@ function SidebarContents() {
       </nav>
 
       <div className="min-h-0 flex-1 overflow-y-auto pt-2">
-        <RecentRepositories />
+        <RecentRepositories onNavigate={onNavigate} />
       </div>
 
       <UserMenu />
@@ -93,15 +95,16 @@ export function AppSidebar() {
 }
 
 export function MobileTopBar() {
+  const [open, setOpen] = useState(false)
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-sidebar px-3 md:hidden">
-      <Sheet>
+      <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Open navigation" />}>
           <Menu />
         </SheetTrigger>
         <SheetContent side="left" className="w-64 bg-sidebar p-0">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
-          <SidebarContents />
+          <SidebarContents onNavigate={() => setOpen(false)} />
         </SheetContent>
       </Sheet>
       <RepoLensLogo className="size-5" />
