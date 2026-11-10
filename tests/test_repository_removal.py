@@ -169,3 +169,81 @@ async def test_removal_needs_the_csrf_token(make_client, real_db_session) -> Non
 
     assert (await alice.delete(f"/repositories/{repo_id}")).status_code == 403
     assert await real_db_session.get(Repository, repo_id) is not None
+
+
+# --- a signup that loses a race with the removal of the last member ------------------------------------------------
+
+def _delete_repository_first(monkeypatch, db: AsyncSession) -> None:
+    """Make the repository vanish between the route's lookup and its membership insert, as a concurrent removal would."""
+    from sqlalchemy import delete
+
+    from apps.api.routes import repositories as routes
+
+    real_add_member = routes.add_member
+
+    async def add_member_after_removal(session, user_id, repository_id):
+        await db.execute(delete(Repository).where(Repository.id == repository_id))
+        await real_add_member(session, user_id, repository_id)
+
+    monkeypatch.setattr(routes, "add_member", add_member_after_removal)
+
+
+async def test_joining_a_stored_repository_that_was_just_removed_asks_to_retry(make_client, real_db_session, monkeypatch) -> None:
+    bob, b_user = await make_client("bob")
+    bob_id = b_user.id
+    repo_id = await new_repository(real_db_session, "octo/demo")
+    _delete_repository_first(monkeypatch, real_db_session)
+
+    response = await bob.post("/repositories", json={"github_url": "https://github.com/octo/demo"})
+
+    assert response.status_code == 409 and "Please try again" in response.json()["detail"]
+    assert await count(real_db_session, UserRepository, UserRepository.user_id == bob_id) == 0
+    assert repo_id  # the 409 came from the lost race, not from a server error
+
+
+async def test_importing_a_renamed_repository_that_was_just_removed_asks_to_retry(make_client, real_db_session, github_service, monkeypatch) -> None:
+    from apps.api.services.github import GitHubRepositoryMetadata
+
+    bob, _b = await make_client("bob")
+    repo_id = await new_repository(real_db_session, "octo/old-name")
+    stored = await real_db_session.get(Repository, repo_id)
+    github_service.get_repository_metadata.return_value = GitHubRepositoryMetadata(stored.github_repo_id, "octo/new-name", "main", None)
+    _delete_repository_first(monkeypatch, real_db_session)
+
+    response = await bob.post("/repositories", json={"github_url": "https://github.com/octo/new-name"})
+
+    assert response.status_code == 409 and "Please try again" in response.json()["detail"]
+
+
+async def test_the_retry_after_a_lost_race_imports_the_repository_again(make_client, real_db_session, github_service) -> None:
+    from apps.api.services.github import GitHubRepositoryMetadata
+
+    alice, a_user = await make_client("alice")
+    bob, _b = await make_client("bob")
+    repo_id = await new_repository(real_db_session, "octo/demo")
+    stored = await real_db_session.get(Repository, repo_id)
+    github_id = stored.github_repo_id
+    await join(real_db_session, a_user, repo_id)
+    assert (await alice.delete(f"/repositories/{repo_id}")).json()["data_deleted"] is True
+    github_service.get_repository_metadata.return_value = GitHubRepositoryMetadata(github_id, "octo/demo", "main", None)
+
+    response = await bob.post("/repositories", json={"github_url": "https://github.com/octo/demo"})
+
+    assert response.status_code == 201 and response.json()["viewer_access"] == "member"
+
+
+async def test_constraint_violations_are_recognised_whether_the_driver_error_is_wrapped_or_not() -> None:
+    import asyncpg
+    from sqlalchemy.dialects.postgresql.asyncpg import AsyncAdapt_asyncpg_dbapi
+    from sqlalchemy.exc import IntegrityError
+
+    from apps.api.routes.repositories import _is_violation
+
+    driver_error = asyncpg.exceptions.UniqueViolationError("duplicate key")
+    bare = IntegrityError("INSERT", {}, driver_error)
+    wrapped_orig = AsyncAdapt_asyncpg_dbapi.IntegrityError("duplicate key")
+    wrapped_orig.__cause__ = driver_error
+    wrapped = IntegrityError("INSERT", {}, wrapped_orig)
+
+    assert _is_violation(bare, asyncpg.exceptions.UniqueViolationError) and _is_violation(wrapped, asyncpg.exceptions.UniqueViolationError)
+    assert not _is_violation(wrapped, asyncpg.exceptions.ForeignKeyViolationError)

@@ -34,6 +34,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["repositories"])
 
 
+def _removed_meanwhile() -> HTTPException:
+    return HTTPException(status_code=409, detail="This repository was just removed by its last member. Please try again.")
+
+
+def _is_violation(exc: IntegrityError, kind: type[Exception]) -> bool:
+    """SQLAlchemy's asyncpg dialect wraps the driver error: `orig` is its own class, the asyncpg error is its cause."""
+    return isinstance(exc.orig, kind) or isinstance(getattr(exc.orig, "__cause__", None), kind)
+
+
+def _is_missing_repository(exc: IntegrityError) -> bool:
+    """The membership insert lost a race with a removal that deleted the repository row first."""
+    return _is_violation(exc, asyncpg.exceptions.ForeignKeyViolationError)
+
+
 def _with_access(repository: Repository, kind: str) -> RepositoryResponse:
     return RepositoryResponse.model_validate(repository).model_copy(update={"viewer_access": kind})
 
@@ -98,8 +112,14 @@ async def create_repository(
     if known is not None:
         if not await is_member(db, user_id, known.id):
             await check_repository_cap(db, settings, user_id)
-        await add_member(db, user_id, known.id)
-        await db.commit()
+        try:
+            await add_member(db, user_id, known.id)
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            if _is_missing_repository(exc):
+                raise _removed_meanwhile() from exc
+            raise
         await db.refresh(known)
         response.status_code = 200
         return _with_access(known, "member")
@@ -135,7 +155,7 @@ async def create_repository(
         await db.commit()
     except SQLAlchemyError as exc:
         await db.rollback()
-        if isinstance(exc, IntegrityError) and isinstance(exc.orig, asyncpg.exceptions.UniqueViolationError):
+        if isinstance(exc, IntegrityError) and _is_violation(exc, asyncpg.exceptions.UniqueViolationError):
             # Two people imported the same repository at the same moment; the other request won.
             repository = (
                 await db.execute(select(Repository).where(Repository.github_repo_id == metadata.github_repo_id))
@@ -143,6 +163,8 @@ async def create_repository(
             await add_member(db, principal.user.id, repository.id)
             await db.commit()
             created = False
+        elif isinstance(exc, IntegrityError) and _is_missing_repository(exc):
+            raise _removed_meanwhile() from exc
         else:
             logger.exception("Failed to save repository %s", metadata.full_name)
             raise HTTPException(status_code=500, detail="Failed to save repository") from exc
