@@ -13,8 +13,9 @@ from apps.api.config import Settings
 from apps.api.core.auth import Principal, get_principal, require_csrf, settings_dep
 from apps.api.core.limits import get_limiter, guest_read_limit
 from apps.api.models.entities import Repository, UserRepository
-from apps.api.schemas.repository import RepositoryCreate, RepositoryResponse
-from apps.api.services.access import RepoAccess, add_member, is_member, read_access, showcase_names
+from apps.api.schemas.repository import RepositoryCreate, RepositoryRemoval, RepositoryResponse
+from apps.api.services.access import RepoAccess, add_member, is_member, member_write, read_access, showcase_names
+from apps.api.services.repository_removal import RemovalBlockedError, remove_from_workspace
 from apps.api.services.quota import check_repository_cap, check_total_repository_cap, reserve_import
 from apps.api.services.rate_limit import Limiter
 from apps.api.services.github import (
@@ -149,3 +150,24 @@ async def create_repository(
     await db.refresh(repository)
     response.status_code = 201 if created else 200
     return _with_access(repository, "member")
+
+
+@router.delete("/repositories/{repository_id}", response_model=RepositoryRemoval, status_code=200)
+async def remove_repository(
+    repository_id: int,
+    db: AsyncSession = Depends(get_db),
+    access: RepoAccess = Depends(member_write),
+    settings: Settings = Depends(settings_dep),
+) -> RepositoryRemoval:
+    """Remove a repository from the signed-in user's workspace, with their conversations about it.
+
+    The stored copy is deleted too only if no other member holds it and it is not in the guest showcase. The GitHub
+    repository is never touched. 409 while ingestion (or, when the stored copy would be deleted, other background
+    work) is still running.
+    """
+    try:
+        result = await remove_from_workspace(db, repository_id, access.user_id, settings)
+    except RemovalBlockedError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RepositoryRemoval(repository_id=result.repository_id, data_deleted=result.data_deleted)

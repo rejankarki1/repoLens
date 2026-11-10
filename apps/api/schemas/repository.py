@@ -28,3 +28,10 @@ class RepositoryResponse(BaseModel):
 
 class RepositoryCreate(BaseModel):
     github_url: NulFreeStr = Field(min_length=1, max_length=2048)
+
+
+class RepositoryRemoval(BaseModel):
+    repository_id: int
+    removed: bool = True
+    # False when other members (or the guest showcase) still use the stored repository data.
+    data_deleted: bool
