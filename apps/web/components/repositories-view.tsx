@@ -86,23 +86,21 @@ export function RepositoriesView() {
         />
       </div>
 
-      <div aria-live="polite">
-        {notice && (
-          <p
-            className={cn(
-              'flex items-start gap-2 rounded-md border px-3 py-2 text-sm',
-              notice.tone === 'success' ? 'border-success/30 bg-success/10 text-success' : 'border-destructive/40 bg-destructive/10 text-destructive',
-            )}
-            role={notice.tone === 'error' ? 'alert' : 'status'}
-          >
-            {notice.tone === 'success' ? <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" /> : <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />}
-            <span className="min-w-0 flex-1">{notice.text}</span>
-            <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss message" className="rounded opacity-70 hover:opacity-100 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40">
-              <X className="size-4" aria-hidden="true" />
-            </button>
-          </p>
-        )}
-      </div>
+      {notice && (
+        <p
+          className={cn(
+            'flex items-start gap-2 rounded-md border px-3 py-2 text-sm',
+            notice.tone === 'success' ? 'border-success/30 bg-success/10 text-success' : 'border-destructive/40 bg-destructive/10 text-destructive',
+          )}
+          role={notice.tone === 'error' ? 'alert' : 'status'}
+        >
+          {notice.tone === 'success' ? <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" /> : <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />}
+          <span className="min-w-0 flex-1">{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss message" className="rounded opacity-70 hover:opacity-100 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40">
+            <X className="size-4" aria-hidden="true" />
+          </button>
+        </p>
+      )}
 
       {isLoading ? (
         <ul className="divide-y divide-border rounded-lg border border-border bg-card" aria-busy="true" aria-label="Loading repositories">
