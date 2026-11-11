@@ -54,7 +54,7 @@ test('a job is running even while technically "not_built" yet (first attempt in 
 // --- describeIndex: the "nothing appears above the question box" regression -----------------------------
 
 test('regression: a fully indexed repository still shows a status line (it used to render nothing at all)', () => {
-  assert.equal(describeIndex(index({ semantic: 'ready', embedded_chunks: 200, chunks: 200 })), 'Semantic index ready (200 chunks).')
+  assert.match(describeIndex(index({ semantic: 'ready', embedded_chunks: 200, chunks: 200 })) ?? '', /^Semantic index ready \(200 code chunks\)/)
 })
 
 test('regression: every loaded state with chunks shows a status line, a button, or both - never nothing', () => {
@@ -70,8 +70,8 @@ test('regression: every loaded state with chunks shows a status line, a button, 
 })
 
 test('partial status shows embedded/total progress, and says when a job is running', () => {
-  assert.match(describeIndex(index({ semantic: 'partial', embedded_chunks: 64 })) ?? '', /64 of 200 chunks\. /)
-  assert.match(describeIndex(index({ semantic: 'partial', embedded_chunks: 64, embedding_job_running: true })) ?? '', /64 of 200 chunks \(indexing…\)/)
+  assert.match(describeIndex(index({ semantic: 'partial', embedded_chunks: 64 })) ?? '', /64 of 200 code chunks\./)
+  assert.match(describeIndex(index({ semantic: 'partial', embedded_chunks: 64, embedding_job_running: true })) ?? '', /64 of 200 code chunks \(indexing…\)/)
 })
 
 test('a first build in progress is described as building, not as "not built yet"', () => {

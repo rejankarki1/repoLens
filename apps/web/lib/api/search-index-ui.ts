@@ -14,15 +14,15 @@ export function describeIndex(index: ApiSearchIndex | undefined): string | null 
   if (!index || index.chunks === 0) return null
   switch (index.semantic) {
     case 'disabled':
-      return 'Semantic search is not configured, so answers use keyword matching.'
+      return 'Answers match on exact words and names, so use the names the code uses.'
     case 'not_built':
       return index.embedding_job_running
-        ? 'Building the semantic index… Answers use keyword matching until it is ready.'
-        : 'The semantic index has not been built yet. Answers use keyword matching, which works best with exact names.'
+        ? 'Building the semantic index (matching by meaning)… Until it is ready, answers match on exact words.'
+        : 'The semantic index is not built yet, so answers match on exact words and names. Build it to also match by meaning.'
     case 'partial':
-      return `Semantic index ${index.embedded_chunks} of ${index.chunks} chunks${index.embedding_job_running ? ' (indexing…)' : ''}. Questions still work and use keyword matching for the rest.`
+      return `Semantic index covers ${index.embedded_chunks} of ${index.chunks} code chunks${index.embedding_job_running ? ' (indexing…)' : ''}. Questions already work; uncovered code is matched on exact words.`
     case 'ready':
-      return `Semantic index ready (${index.chunks} chunks).`
+      return `Semantic index ready (${index.chunks} code chunks): questions are matched by meaning, not just exact words.`
     default:
       return null
   }

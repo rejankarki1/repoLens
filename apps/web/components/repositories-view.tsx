@@ -4,12 +4,14 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { AlertCircle, CheckCircle2, FolderGit2, GitBranch, GitCommitHorizontal, Plus, RefreshCw, Search, Trash2, TriangleAlert, X } from 'lucide-react'
 import { GitHubSignIn } from '@/components/auth/github-sign-in'
+import { IndexBadge } from '@/components/index-badge'
 import { IndexingStatus } from '@/components/indexing-status'
 import { PageHeader, PageShell } from '@/components/page-shell'
 import { RemoveRepositoryDialog } from '@/components/remove-repository-dialog'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { describeIngestionError, startIngestion } from '@/lib/api/client'
+import { useSearchIndex } from '@/lib/api/hooks'
 import { useRepositories } from '@/lib/api/hooks'
 import { useAuth } from '@/lib/auth/use-auth'
 import { filterRepositories, formatRelativeTime, isIngesting } from '@/lib/repo-utils'
@@ -180,6 +182,8 @@ function RepositoryRow({
   const { id, owner, name, fullName, status, progress, error, defaultBranch, indexedCommit, lastAnalyzedAt, truncated, viewerAccess } = repository
   const member = viewerAccess === 'member'
   const busy = isIngesting(status) || reanalyzing
+  // Same readiness badge as the dashboard cards, fetched once per row (member-only on the server).
+  const { data: index } = useSearchIndex(member && status === 'completed' ? repository : undefined, { poll: false })
 
   return (
     <li className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
@@ -214,6 +218,7 @@ function RepositoryRow({
                 Partial snapshot
               </span>
             )}
+            <IndexBadge index={index} />
             {!member && <span className="rounded border border-border px-1.5 py-0.5 text-[11px]">Demo · read-only</span>}
           </p>
         )}

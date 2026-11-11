@@ -63,8 +63,9 @@ export function RepositoryGate({ id, children }: { id: string; children: (repo: 
 
   if (repo.status === 'failed') {
     return (
-      <StateMessage icon={<AlertCircle className="size-5 text-destructive" aria-hidden="true" />} title="Analysis failed">
-        {repo.error ?? 'Something went wrong while ingesting this repository.'} Use Re-analyze above to try again.
+      <StateMessage icon={<AlertCircle className="size-5 text-destructive" aria-hidden="true" />} title="Ingestion failed">
+        {(repo.error ?? 'Something went wrong while ingesting this repository.').replace(/\.?$/, '.')}
+        <StartIngestionButton id={repo.id} label="Try again" />
       </StateMessage>
     )
   }
@@ -127,7 +128,7 @@ function SnapshotBanner({ repo }: { repo: Repository }) {
   )
 }
 
-function StartIngestionButton({ id }: { id: string }) {
+function StartIngestionButton({ id, label = 'Start ingestion' }: { id: string; label?: string }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -149,7 +150,7 @@ function StartIngestionButton({ id }: { id: string }) {
     <>
       <Button size="sm" className="mt-2" onClick={handleClick} disabled={submitting}>
         {submitting && <Loader2 className="animate-spin" aria-hidden="true" />}
-        Start ingestion
+        {label}
       </Button>
       {error && (
         <p role="alert" className="mt-2 text-destructive">
