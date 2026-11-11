@@ -225,6 +225,13 @@ class Settings(BaseSettings):
     # Repositories (owner/name, comma separated) that signed-out visitors may browse read-only. Nothing is public unless listed.
     guest_showcase_repositories: str = ""
 
+    # Live Ask AI for signed-out visitors, only about the showcase repositories, nothing saved. Off until enabled.
+    # Every cap is a fixed 24 h window; the shared ai_global_* budget and concurrency limits apply on top.
+    guest_ai_enabled: bool = False
+    guest_ai_per_visitor_daily: int = 3  # per anonymous-visitor cookie
+    guest_ai_per_ip_daily: int = 30  # per client IP, only when the IP is trustworthy (see core/limits.py)
+    guest_ai_global_daily: int = 20  # all guests together
+
     # Two layers, the later file wins: `.env` is the shared base (AI keys, models, Docker ports); `.env.oauth-check`, when it
     # exists, overrides only what differs for the isolated OAuth-check setup (database, Redis db, queue, GitHub OAuth app,
     # URLs). A file that does not exist is skipped, so CI and fresh clones read `.env` alone. Variables exported in the
@@ -250,6 +257,10 @@ class Settings(BaseSettings):
     def session_cookie_name(self) -> str:
         # The __Host- prefix makes browsers require Secure, Path=/ and no Domain, so a sibling subdomain cannot set it.
         return "__Host-rl_session" if self.cookie_secure else "rl_session"
+
+    @property
+    def visitor_cookie_name(self) -> str:
+        return "__Host-rl_visitor" if self.cookie_secure else "rl_visitor"
 
     @property
     def oauth_state_cookie_name(self) -> str:

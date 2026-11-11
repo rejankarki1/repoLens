@@ -79,7 +79,7 @@ Identity always comes from the session cookie. No endpoint accepts a user id fro
 
 ## Guest showcase
 
-An explicit allow-list, `GUEST_SHOWCASE_REPOSITORIES` (comma separated `owner/name`). Nothing is public unless listed. Guests can list the showcase, open the overview, Code Explorer and Architecture Explorer, and nothing else: no imports, no re-analysis, no search, no AI, no conversations. A signed-in user may view showcase repositories read-only and adds one to their workspace (no new indexing) to ask questions. Guest requests are rate limited per IP.
+An explicit allow-list, `GUEST_SHOWCASE_REPOSITORIES` (comma separated `owner/name`). Nothing is public unless listed. Guests can list the showcase, open the overview, Code Explorer and Architecture Explorer, and read the curated example answers (real saved answers with their citations, see `scripts/publish_showcase_answers.py`), and nothing else: no imports, no re-analysis, no deletion, no search, no AI, no conversations. A signed-in user may view showcase repositories read-only and adds one to their workspace (no new indexing) to ask questions. Guest requests are rate limited per IP.
 
 ## Usage protection
 
@@ -107,8 +107,10 @@ Production start-up validation (secure cookies, HTTPS web URL, OAuth credentials
 | POST | `/auth/logout`, `/auth/logout-all` | signed in + CSRF | 204; the cookie is cleared. |
 | GET | `/repositories` | anyone | Your workspace; for a visitor, the showcase. Each item has `viewer_access` (`member` or `guest`). |
 | POST | `/repositories` | signed in + CSRF | Adds a public repository: 201 if new, 200 if already stored (nothing downloaded again). |
-| GET | `/repositories/{id}` and its `files`, `files/content`, `ingestion-status`, `architecture*` | member, or anyone for showcase repositories | Read-only. |
+| DELETE | `/repositories/{id}` | member + CSRF | Removes it from your workspace with your conversations about it. The stored copy is deleted only if nobody else is a member and it is not in the showcase; 409 while ingestion (or, if the copy would be deleted, other jobs) is running. GitHub is never contacted. |
+| GET | `/repositories/{id}` and its `files`, `files/content`, `ingestion-status`, `architecture*`, `showcase-answers` | member, or anyone for showcase repositories | Read-only. `showcase-answers` are curated, saved answers: no AI call. |
 | POST | `/repositories/{id}/ingestions`, `/embeddings`, `/architecture` | member + CSRF | Background jobs; hourly and concurrency limits. |
+| GET, POST | `/repositories/{id}/guest-ask`, `/guest-ask/stream` | anyone, showcase repositories only, when `GUEST_AI_ENABLED`; the POST needs an allowed `Origin` | Status (remaining questions, no cookie, no count) and one stateless streamed question. Counted per visitor cookie, per trustworthy IP and for all guests per day, then the shared AI budget and slots. Nothing is saved. |
 | GET | `/repositories/{id}/search`, `/search-index` | member | Hybrid search spends embedding quota. |
 | * | `/repositories/{id}/conversations...` | member (owner of the conversation) + CSRF for writes | Questions are subject to the AI quotas. |
 

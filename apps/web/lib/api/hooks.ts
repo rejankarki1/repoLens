@@ -9,6 +9,8 @@ import { getFile, getFileSummaries, getRepository, listRepositories, toFileTree 
 import { getArchitecture, getArchitectureNode, getArchitectureStatus, type AnalysisStatus } from './architecture'
 import { getArchitectureDiagram, getArchitectureDiagramStatus, type DiagramStatus } from './architecture-diagram'
 import { getSearchIndex, listConversations } from './chat'
+import { getGuestAsk } from './guest-ask'
+import { getShowcaseAnswers } from './showcase'
 
 /** Queued or being processed by the worker: the status will change on its own, so keep polling. */
 const isActive = (r?: Repository) => r?.status === 'queued' || r?.status === 'importing' || r?.status === 'indexing'
@@ -124,8 +126,18 @@ export function useConversations(repoId: string, enabled = true) {
 }
 
 /** Embedding-index readiness; only informs the UI, chatting works without it (keyword fallback). */
-export function useSearchIndex(repo: Repository | undefined) {
+export function useSearchIndex(repo: Repository | undefined, { poll = true }: { poll?: boolean } = {}) {
   return useSWR(readyKey(repo, 'search-index'), () => getSearchIndex(repo!.id), {
-    refreshInterval: (data) => (data?.semantic === 'partial' || data?.semantic === 'not_built' ? 15_000 : 0),
+    refreshInterval: (data) => (poll && (data?.semantic === 'partial' || data?.semantic === 'not_built') ? 15_000 : 0),
   })
+}
+
+/** Curated example answers for a repository (empty for repositories that have none); never calls the AI. */
+export function useShowcaseAnswers(repoId: string, enabled = true) {
+  return useSWR(enabled ? ['showcase-answers', repoId] : null, () => getShowcaseAnswers(repoId))
+}
+
+/** Whether visitors may ask live questions about a showcase repository, and how many they have left (never calls the AI). */
+export function useGuestAsk(repoId: string, enabled = true) {
+  return useSWR(enabled ? ['guest-ask', repoId] : null, () => getGuestAsk(repoId), { shouldRetryOnError: false })
 }

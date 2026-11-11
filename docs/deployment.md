@@ -50,7 +50,7 @@ Migrations are not run on boot (Render Free has no pre-deploy command, and a web
 cd /path/to/repoLens
 DATABASE_URL='postgresql://…neon…?sslmode=require' REDIS_URL='redis://127.0.0.1:6379/15' \
   apps/api/venv/bin/alembic upgrade head
-DATABASE_URL='postgresql://…neon…?sslmode=require' apps/api/venv/bin/alembic current   # f1c4a7b9e820 (head)
+DATABASE_URL='postgresql://…neon…?sslmode=require' apps/api/venv/bin/alembic current   # a9e3c5d17b02 (head)
 ```
 
 (`REDIS_URL` is only there so nothing can reach your real queue; alembic does not use it.) Do not run `claim_local_data` on production. Local users, sessions and conversations are never copied.
@@ -89,9 +89,21 @@ Existing, server-side in Redis: AI questions per user per day and burst, global 
 No code or authorization change is needed; the existing showcase allow-list does it.
 
 1. Deploy with `GUEST_SHOWCASE_REPOSITORIES` empty. Sign in yourself and import the three repositories, wait for ingestion, then (signed in as a member) build embeddings and generate the architecture diagram for each. All of this is cached in Neon.
-2. Set `GUEST_SHOWCASE_REPOSITORIES=owner/classlens,rejankarki1/wanderlust,<small/repo>` on Render (exact `owner/name`, case-insensitive) and redeploy.
+2. Set `GUEST_SHOWCASE_REPOSITORIES=owner/classlens,rejankarki1/wanderlust,<small/repo>` on Render (exact `owner/name`, case-insensitive) and redeploy. The landing page's "Try Demo" and demo cards show the two demo repositories that were imported first, so import your two best ones first and keep the list to those two.
+3. Publish example answers, so visitors see real Ask AI output without any AI spend. Signed in as a member, ask 2 to 4 good questions per demo repository in Ask AI and note each conversation id (`c=` in the address bar). Then, with the production `DATABASE_URL` (and `GUEST_SHOWCASE_REPOSITORIES`) in the environment: `python -m apps.api.scripts.publish_showcase_answers --repo owner/name --conversation 12 --conversation 13` to preview, and add `--apply` to publish (`--replace` starts over). Answers are copied exactly as saved, only pairs with citations, and only for listed repositories. Re-run it after re-ingesting a repository at a new commit, because the stored citations point at the commit they were written against (the preview flags a mismatch).
 
-Result: signed-out visitors can browse repositories, Code Explorer, architecture and cached diagrams, read-only, rate-limited per IP. **Security implications:** only listed repositories are readable without sign-in, and they are public GitHub repositories anyway; everything else still returns 401/404. Ask AI, search, conversations and any job that spends AI budget stay member-only: a signed-in visitor clicks "Add to my repositories" (free for stored repositories) and then asks questions against your shared embeddings, subject to their personal and the global quotas. A member of a showcase repository can also re-trigger its diagram (within `ARCHITECTURE_DIAGRAM_HOURLY_LIMIT`), which replaces the cached one; keep that limit low. The Wanderlust fixture under `apps/web/public/dev-fixtures/` is a static development file and is not part of this flow.
+Result: signed-out visitors can browse repositories, Code Explorer, architecture, cached diagrams and the published example answers, read-only, rate-limited per IP. **Security implications:** only listed repositories are readable without sign-in, and they are public GitHub repositories anyway; everything else still returns 401/404. Ask AI, search, conversations and any job that spends AI budget stay member-only: a signed-in visitor clicks "Add to my repositories" (free for stored repositories) and then asks questions against your shared embeddings, subject to their personal and the global quotas. A member of a showcase repository can also re-trigger its diagram (within `ARCHITECTURE_DIAGRAM_HOURLY_LIMIT`), which replaces the cached one; keep that limit low. The Wanderlust fixture under `apps/web/public/dev-fixtures/` is a static development file and is not part of this flow.
+
+## Free questions for visitors (optional, off by default)
+
+Signed-out visitors can ask a few live questions about the showcase repositories, answered by the same retrieval and model as members, with the same citations. Nothing is saved, and every other write (import, indexing, deletion, conversations) stays member-only. The saved example answers are always shown and never call the AI.
+
+Enable it only after the showcase works: set `GUEST_AI_ENABLED=true` on Render (needs `GROQ_API_KEY`/`GEMINI_API_KEY` as for members) and redeploy. Defaults: `GUEST_AI_PER_VISITOR_DAILY=3`, `GUEST_AI_PER_IP_DAILY=30`, `GUEST_AI_GLOBAL_DAILY=20`. Turn it off again by unsetting it. The shared `AI_GLOBAL_DAILY_LIMIT` and `AI_GLOBAL_CONCURRENCY` also apply, so the worst daily guest spend is `GUEST_AI_GLOBAL_DAILY` questions.
+
+- **Visitor cookie**: `__Host-rl_visitor` (Secure, HttpOnly, SameSite=Lax, Path=/), issued by the API on a visitor's first question and passed through the Vercel rewrite like the session cookie. Clearing it gives a visitor a new allowance, which is why the all-visitors cap exists.
+- **Per-IP cap**: used only when the client address can be believed. Leave `TRUSTED_PROXIES` empty (the default) and it is skipped; the visitor and all-visitors caps then do the work. Do not set `FORWARDED_ALLOW_IPS`. Checked locally: `next start`'s rewrite forwards a client-supplied `X-Forwarded-For` to the API unchanged, so the header proves nothing unless every hop is yours; Vercel's own behaviour could not be verified here. Set `TRUSTED_PROXIES` only to address ranges you have confirmed for both Vercel's egress and Render's proxy; otherwise the "client" would be a shared proxy address.
+- **Refunds**: a question that is refused (any cap, missing Origin, repository not indexed) costs nothing. Once retrieval has started, the question stays counted even if the answer fails or the visitor closes the tab.
+- **Redis down**: guest questions are refused (503); the saved examples and browsing keep working.
 
 ## Smoke test after deploying
 
@@ -108,7 +120,7 @@ Result: signed-out visitors can browse repositories, Code Explorer, architecture
 
 ## Updating an existing deployment
 
-This release needs **no database migration**: the Alembic head is still `f1c4a7b9e820`. Check that the production database is at that revision before deploying (from the repository root, with the real URL set only in your shell; paste Neon's string as shown, the app converts `sslmode` to asyncpg's `ssl`):
+This release adds one migration, `a9e3c5d17b02` (a new empty `showcase_answers` table; nothing existing is altered). It is additive, so the previous API keeps working against the migrated database, which makes this order safe: migrate, then deploy the API, then the web app. Check that production is at the previous revision first (from the repository root, with the real URL set only in your shell; paste Neon's string as shown, the app converts `sslmode` to asyncpg's `ssl`):
 
 ```bash
 DATABASE_URL='postgresql://…neon…?sslmode=require' REDIS_URL='redis://127.0.0.1:6379/15' \
@@ -116,10 +128,12 @@ DATABASE_URL='postgresql://…neon…?sslmode=require' REDIS_URL='redis://127.0.
 ```
 
 1. In Neon, create a branch of the production branch as a restore point.
-2. Confirm on Render: `EMBEDDING_MAX_CHUNKS_PER_REPOSITORY=3000`.
-3. Merge to `main`. Render has auto-deploy off: use *Manual Deploy → Deploy latest commit*. Vercel deploys from `main` on its own.
-4. Run the checklist above (health, sign-in, Ask AI with citations, Architecture tab, import status).
-5. Rollback: redeploy the previous commit in Render and Vercel. No schema change is involved.
+2. Migrate: the same command with `upgrade head`, then `current` again (expect `a9e3c5d17b02 (head)`).
+3. Confirm on Render: `EMBEDDING_MAX_CHUNKS_PER_REPOSITORY=3000`, and set `GUEST_SHOWCASE_REPOSITORIES` (see "Sample repositories").
+4. Merge to `main`. Render has auto-deploy off: use *Manual Deploy → Deploy latest commit*. Vercel deploys from `main` on its own.
+5. Run the checklist above (health, sign-in, Ask AI with citations, Architecture tab, import status, the landing page signed out, removing a repository you imported only for the test).
+6. Publish the example answers (see "Sample repositories").
+7. Rollback: redeploy the previous commit in Render and Vercel. The extra table is harmless to the old code; `alembic downgrade f1c4a7b9e820` drops it (and any published answers) if you want it gone.
 
 ## Limitations and unverified assumptions
 

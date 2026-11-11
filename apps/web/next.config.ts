@@ -8,6 +8,8 @@ import type { NextConfig } from "next";
 const apiOrigin = (process.env.API_ORIGIN ?? '').replace(/\/+$/, '')
 
 const nextConfig: NextConfig = {
+  // The browser smoke test builds into its own directory so it can never overwrite a running server's `.next`.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   async rewrites() {
     return apiOrigin ? [{ source: '/api/:path*', destination: `${apiOrigin}/:path*` }] : []
   },

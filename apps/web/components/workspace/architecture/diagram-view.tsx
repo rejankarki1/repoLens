@@ -701,7 +701,7 @@ function DiagramCanvas({
         </div>
       </div>
       <DiagramBanners status={status} requestError={requestError} />
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         <div
           ref={viewportRef}
           className="relative min-h-0 w-full flex-1 cursor-grab touch-none select-none overflow-hidden overscroll-contain bg-background active:cursor-grabbing"
@@ -825,7 +825,10 @@ function Minimap({
 
 function ComponentPanel({ repoId, component, onClose }: { repoId: string; component: DiagramComponent; onClose: () => void }) {
   return (
-    <aside className="w-80 shrink-0 overflow-y-auto border-l border-border bg-sidebar/50 p-4 text-sm" aria-label="Component details">
+    <aside
+      className="z-10 w-80 shrink-0 overflow-y-auto border-l border-border bg-sidebar/50 p-4 text-sm max-lg:absolute max-lg:inset-x-0 max-lg:bottom-0 max-lg:max-h-[55%] max-lg:w-auto max-lg:border-t max-lg:border-l-0 max-lg:bg-card max-lg:shadow-lg"
+      aria-label="Component details"
+    >
       <div className="flex items-start justify-between gap-2">
         <h3 className="font-medium">{component.label}</h3>
         <Button size="icon-xs" variant="ghost" aria-label="Close" onClick={onClose}>

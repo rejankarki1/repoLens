@@ -369,3 +369,78 @@ def test_paths_listed_in_the_map_are_not_flagged_as_invented() -> None:
 async def test_structure_context_returns_none_for_an_empty_snapshot(api: dict) -> None:
     repo_id = await new_repository(api["db"], "octo/empty")
     assert await structure.structure_context(api["db"], repo_id, "f" * 40, "Where is the entry point?") is None
+
+
+# --- Next.js: the framework starts from conventional files, not from listen()/createRoot() -------------------------
+
+NEXT_PKG = json.dumps({"name": "task-app", "scripts": {"dev": "next dev", "build": "next build", "start": "next start"},
+                       "dependencies": {"next": "14.2.0", "react": "^18"}})
+
+
+def test_nextjs_app_router_entry_points_are_found() -> None:
+    files = {
+        "package.json": (NEXT_PKG, "json"), "next.config.mjs": ("export default {}\n", "javascript"),
+        "app/layout.tsx": ("export default function RootLayout({ children }) { return <html>{children}</html> }\n", "typescript"),
+        "app/page.tsx": ("export default function Home() { return <main /> }\n", "typescript"),
+        "app/globals.css": ("body{}\n", "css"), "components/ui/button.tsx": ("export const Button = () => null\n", "typescript"),
+    }
+    paths, contents = contents_of(files)
+    found = discover(paths, contents)
+    assert {e.path for e in found.entries} == {"app/layout.tsx", "app/page.tsx", "next.config.mjs"}
+    layout = next(e for e in found.entries if e.path == "app/layout.tsx")
+    assert layout.area == "frontend" and layout.declared_by == ["package.json: dependencies.next"]
+    assert any(d.path == "package.json" and d.line == 1 for d in found.declarations)
+    assert gap_notes(found, found.entries, None, False) == []
+
+
+def test_nextjs_pages_router_and_src_layout_are_found() -> None:
+    files = {"web/package.json": (NEXT_PKG, "json"), "web/src/pages/_app.tsx": ("export default function App() { return null }\n", "typescript"),
+             "web/src/pages/index.tsx": ("export default function Home() { return null }\n", "typescript")}
+    paths, contents = contents_of(files)
+    assert {e.path for e in discover(paths, contents).entries} == {"web/src/pages/_app.tsx", "web/src/pages/index.tsx"}
+
+
+def test_a_package_without_next_gets_no_next_entries() -> None:
+    files = {"package.json": (json.dumps({"dependencies": {"react": "^18"}}), "json"), "app/page.tsx": ("export default () => null\n", "typescript")}
+    paths, contents = contents_of(files)
+    assert discover(paths, contents).entries == []
+
+
+class _LockResult:
+    def scalar_one(self) -> bool:
+        return True
+
+
+class _DeadAfterLock:
+    """A lock connection that works for pg_try_advisory_lock and is closed by the database before the unlock."""
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def execute(self, *args, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return _LockResult()
+        raise RuntimeError("connection is closed")
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _Engine:
+    def __init__(self) -> None:
+        self.connection = _DeadAfterLock()
+
+    def connect(self):
+        return self.connection
+
+
+async def test_embedding_lock_release_on_a_closed_connection_does_not_fail_the_job() -> None:
+    from apps.api.services.embeddings import embedding_lock
+
+    engine = _Engine()
+    async with embedding_lock(engine, 7) as acquired:  # type: ignore[arg-type]
+        assert acquired is True
+    assert engine.connection.calls == 2  # the unlock was attempted, its failure was absorbed

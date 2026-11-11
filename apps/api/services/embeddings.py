@@ -289,9 +289,15 @@ async def embedding_lock(engine: AsyncEngine, repository_id: int) -> AsyncIterat
             yield bool(got)
         finally:
             if got:
-                await connection.execute(
-                    text("SELECT pg_advisory_unlock(:ns, :repo)"), {"ns": EMBEDDING_LOCK_NAMESPACE, "repo": repository_id}
-                )
+                try:
+                    await connection.execute(
+                        text("SELECT pg_advisory_unlock(:ns, :repo)"), {"ns": EMBEDDING_LOCK_NAMESPACE, "repo": repository_id}
+                    )
+                except Exception:  # noqa: BLE001
+                    # The lock connection sits idle for the whole job (minutes, with provider rate limits) and the
+                    # database may have closed it. PostgreSQL has then already released the lock, and the work is
+                    # done and committed: failing the job here only made RQ re-run a finished job (seen in production).
+                    logger.warning("Could not release the embedding lock for repository %s; the database already dropped it", repository_id)
 
 
 async def embedding_job_running(db: AsyncSession, repository_id: int) -> bool:

@@ -252,9 +252,18 @@ export async function streamQuestion(
   handlers: StreamHandlers,
   signal: AbortSignal,
 ): Promise<void> {
+  return streamFrom(`${base(repoId)}/${conversationId}/messages/stream`, question, handlers, signal)
+}
+
+/** The visitor variant: one question about a showcase repository, nothing saved on the server (see `guest-ask.ts`). */
+export function streamGuestQuestion(repoId: string, question: string, handlers: StreamHandlers, signal: AbortSignal): Promise<void> {
+  return streamFrom(`${API_URL}/repositories/${encodeURIComponent(repoId)}/guest-ask/stream`, question, handlers, signal)
+}
+
+async function streamFrom(url: string, question: string, handlers: StreamHandlers, signal: AbortSignal): Promise<void> {
   let response: Response
   try {
-    response = await apiFetch(`${base(repoId)}/${conversationId}/messages/stream`, {
+    response = await apiFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
       body: JSON.stringify({ content: question }),

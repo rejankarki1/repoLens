@@ -47,3 +47,26 @@ export function resumeIndexingAction(index: ApiSearchIndex | undefined): ResumeI
   }
   return { visible: true, disabled: false, label: index.semantic === 'partial' ? 'Resume indexing' : 'Build index' }
 }
+
+export type IndexBadgeTone = 'success' | 'working' | 'warning' | 'muted'
+
+/** A short label for repository lists: how searchable the repository is right now. Null until the status is known. */
+export function indexBadge(index: ApiSearchIndex | undefined): { label: string; tone: IndexBadgeTone } | null {
+  if (!index) return null
+  if (index.chunks === 0) return { label: 'No code index', tone: 'warning' }
+  switch (index.semantic) {
+    case 'ready':
+      return { label: 'Semantic index ready', tone: 'success' }
+    case 'partial':
+      return {
+        label: `Index ${index.embedded_chunks}/${index.chunks}`,
+        tone: index.embedding_job_running ? 'working' : 'warning',
+      }
+    case 'not_built':
+      return index.embedding_job_running ? { label: 'Indexing…', tone: 'working' } : { label: 'Keyword search', tone: 'muted' }
+    case 'disabled':
+      return { label: 'Keyword search', tone: 'muted' }
+    default:
+      return null
+  }
+}

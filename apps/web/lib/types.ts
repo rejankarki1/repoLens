@@ -15,6 +15,8 @@ export interface Repository {
   /** 0-100 while importing or indexing; null when the backend reports no percentage */
   progress: number | null
   error: string | null
+  /** The stored snapshot is incomplete (the repository exceeded the ingestion limits). */
+  truncated: boolean
   /** member: in your workspace. guest: a showcase repository you may only browse. */
   viewerAccess: 'member' | 'guest'
 }

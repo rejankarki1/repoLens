@@ -60,6 +60,7 @@ class Reservation:
 class Limiter(Protocol):
     async def reserve(self, key: str, limit: int, window_seconds: int, cost: int = 1) -> Reservation: ...
     async def refund(self, key: str, cost: int = 1) -> None: ...
+    async def usage(self, key: str) -> tuple[int, int]: ...
     async def acquire(self, key: str, limit: int, ttl_seconds: int) -> str | None: ...
     async def release(self, key: str, token: str) -> None: ...
 
@@ -75,6 +76,11 @@ class RedisLimiter:
 
     async def refund(self, key: str, cost: int = 1) -> None:
         await self._refund(keys=[self._p + key], args=[cost])
+
+    async def usage(self, key: str) -> tuple[int, int]:
+        """(used, seconds until the window resets) without counting anything; (0, 0) when no window is open."""
+        used, ttl = await self._r.get(self._p + key), await self._r.ttl(self._p + key)
+        return (int(used), max(0, int(ttl))) if used is not None and int(ttl) > 0 else (0, 0)
 
     async def acquire(self, key: str, limit: int, ttl_seconds: int) -> str | None:
         token = secrets.token_hex(8)
@@ -110,6 +116,12 @@ class MemoryLimiter:
             used, expires = self._counters.get(key, (0, 0.0))
             if used > 0 and expires > self._now():
                 self._counters[key] = (max(0, used - cost), expires)
+
+    async def usage(self, key: str) -> tuple[int, int]:
+        async with self._lock:
+            used, expires = self._counters.get(key, (0, 0.0))
+            now = self._now()
+            return (used, max(1, int(expires - now + 0.999))) if used > 0 and expires > now else (0, 0)
 
     async def acquire(self, key: str, limit: int, ttl_seconds: int) -> str | None:
         async with self._lock:

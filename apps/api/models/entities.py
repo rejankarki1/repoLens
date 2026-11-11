@@ -313,3 +313,21 @@ class ArchitectureDiagramRecord(Base):
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)  # provider/model that produced the result, for diagnostics
     diagram: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)  # the sealed ArchitectureDiagram
+
+
+class ShowcaseAnswer(Base):
+    """A real, saved answer (with its validated citations) published for visitors of a showcase repository.
+
+    Rows are copied from an actual conversation by `scripts/publish_showcase_answers.py`; nothing is written by
+    visitors and no AI is called to serve them, so anonymous browsing costs nothing.
+    """
+
+    __tablename__ = "showcase_answers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer)  # display order within the repository
+    question: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    citations: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
