@@ -5,7 +5,7 @@ import useSWR from 'swr'
 import type { Repository } from '@/lib/types'
 import { summarizeFiles } from '@/lib/repo-stats'
 import { isActive as analysisActive, STATUS_POLL_MS } from '@/lib/architecture/model'
-import { getFile, getFileSummaries, getRepository, listRepositories, toFileTree } from './client'
+import { getFile, getFileSummaries, getRepository, listRepositories, listShowcaseRepositories, toFileTree } from './client'
 import { getArchitecture, getArchitectureNode, getArchitectureStatus, type AnalysisStatus } from './architecture'
 import { getArchitectureDiagram, getArchitectureDiagramStatus, type DiagramStatus } from './architecture-diagram'
 import { getSearchIndex, listConversations } from './chat'
@@ -20,6 +20,12 @@ export function useRepositories() {
   return useSWR('repositories', listRepositories, {
     refreshInterval: (data) => (data?.some(isActive) ? POLL_MS : 0),
   })
+}
+
+/** The demo repositories, the same list for a visitor or a signed-in member: used wherever the demo is shown
+ * regardless of who is looking (the landing page, and `/dashboard` in demo view or for a brand-new member). */
+export function useShowcaseRepositories() {
+  return useSWR('showcase-repositories', listShowcaseRepositories)
 }
 
 export function useRepository(id: string) {

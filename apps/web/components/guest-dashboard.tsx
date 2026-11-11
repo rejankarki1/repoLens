@@ -6,16 +6,18 @@ import { DemoRepositoryCard } from '@/components/demo-repository-card'
 import { PageShell, SectionHeading } from '@/components/page-shell'
 import { RepositoryImportForm } from '@/components/repository-import-form'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useRepositories } from '@/lib/api/hooks'
+import { useShowcaseRepositories } from '@/lib/api/hooks'
 
 /**
- * What a visitor sees on `/dashboard`: the two demo repositories, front and center, with their own Ask AI /
- * Explore Code / Architecture actions; importing a repository of your own is a secondary action below it.
- * Sign-in is not pitched up front — `RepositoryImportForm` offers it contextually, once a guest pastes a
- * URL, so there is never more than one sign-in prompt on screen at a time.
+ * The demo dashboard: the two demo repositories, front and center, with their own Ask AI / Explore Code /
+ * Architecture actions; importing a repository of your own is a secondary action below it. This is what
+ * `/dashboard` shows to a visitor, and also what a signed-in member sees for a brand-new, empty workspace or
+ * after asking for `?view=demo` — always the same showcase list, never a member's own repositories. Sign-in
+ * is not pitched up front — `RepositoryImportForm` offers it contextually, once a guest pastes a URL, so
+ * there is never more than one sign-in prompt on screen at a time.
  */
 export function GuestDashboard() {
-  const { data, isLoading } = useRepositories()
+  const { data, isLoading } = useShowcaseRepositories()
   const repositories = (data ?? []).slice(0, 2)
 
   return (

@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { FileSearch, ListChecks, MessageSquareText } from 'lucide-react'
 import { GitHubIcon, RepoLensLogo } from '@/components/icons'
 import { DemoLink } from '@/components/landing/demo-link'
-import { AuthRedirect, HeaderAction, HeroActions, HeroNote } from '@/components/landing/landing-actions'
+import { HeaderAction, HeroActions, HeroNote } from '@/components/landing/landing-actions'
 import { DemoRepositories } from '@/components/landing/demo-repositories'
 import { PAGE_WIDTH } from '@/components/page-shell'
 
@@ -39,7 +39,6 @@ const FEATURES = [
 export default function Home() {
   return (
     <div className="min-h-dvh bg-background">
-      <AuthRedirect />
       <header className="border-b border-border">
         <div className={`${PAGE_WIDTH} flex h-14 items-center justify-between gap-4`}>
           <Link href="/" className="flex items-center gap-2.5 rounded focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40">
