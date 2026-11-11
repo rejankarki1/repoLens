@@ -66,6 +66,18 @@ async def test_the_window_starts_at_the_first_use_and_then_resets(redis_client) 
     await redis_client.delete(redis._p + "k")
 
 
+async def test_usage_reads_a_window_without_counting_or_opening_one(limiter) -> None:
+    assert await limiter.usage("k") == (0, 0)
+    assert await limiter.usage("k") == (0, 0)  # reading did not start a window
+    await limiter.reserve("k", 5, 600)
+    await limiter.reserve("k", 5, 600)
+
+    used, resets_in = await limiter.usage("k")
+
+    assert used == 2 and 0 < resets_in <= 600
+    assert (await limiter.usage("k"))[0] == 2  # and reading again changed nothing
+
+
 async def test_refund_gives_capacity_back_and_never_goes_below_zero(limiter) -> None:
     for _ in range(3):
         await limiter.reserve("k", 3, 60)

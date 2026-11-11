@@ -2,8 +2,10 @@
 
 import ipaddress
 import logging
+import re
+import secrets
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, Response
 from redis.exceptions import RedisError
 
 from apps.api.config import Settings
@@ -86,3 +88,47 @@ async def guest_read_limit(
         return
     if not result.allowed:
         raise too_many("Too many requests from this address.", result.retry_after, "guest")
+
+
+def trustworthy_client_ip(request: Request, settings: Settings) -> str | None:
+    """The caller's address only when it can be believed, else None (callers then rely on other limits).
+
+    Behind a proxy the TCP peer is the proxy, so without TRUSTED_PROXIES the address means nothing; in production that
+    is always the case (Render, Vercel), so no address is used. With TRUSTED_PROXIES the address is the first hop the
+    operator does not vouch for, and an address that is itself a trusted proxy is not a client. In development there is
+    no proxy and the peer is the client."""
+    networks = settings.trusted_proxy_networks
+    if not networks:
+        peer = request.client.host if request.client else None
+        return None if settings.is_production else peer
+    address = client_ip(request, settings)
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError:
+        return None
+    return None if any(parsed in net for net in networks) else address
+
+
+_VISITOR_ID = re.compile(r"^[0-9a-f]{32}$")
+VISITOR_COOKIE_MAX_AGE = 30 * 24 * 3600
+
+
+def visitor_id(request: Request, settings: Settings) -> tuple[str, bool]:
+    """The anonymous visitor's id from its cookie, or a fresh one (second value True) if there is none or it is malformed."""
+    value = request.cookies.get(settings.visitor_cookie_name, "")
+    return (value, False) if _VISITOR_ID.match(value) else (secrets.token_hex(16), True)
+
+
+def set_visitor_cookie(response: Response, settings: Settings, value: str) -> None:
+    """HttpOnly, SameSite=Lax, Secure in production (then `__Host-`: Path=/, no Domain, so it cannot be set by a sibling site)."""
+    response.set_cookie(
+        settings.visitor_cookie_name, value, max_age=VISITOR_COOKIE_MAX_AGE, path="/",
+        httponly=True, secure=settings.cookie_secure, samesite="lax",
+    )
+
+
+def require_allowed_origin(request: Request, settings: Settings) -> None:
+    """Guests have no CSRF token, so a state-spending request must come from the web app: browsers always send Origin on
+    a cross-site POST, and on the same-origin POSTs the app makes. Missing or foreign: refused before anything is counted."""
+    if request.headers.get("origin") not in settings.allowed_origins:
+        raise HTTPException(status_code=403, detail="This origin is not allowed")

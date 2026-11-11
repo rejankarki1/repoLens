@@ -90,6 +90,82 @@ def shielded(awaitable) -> "asyncio.Future":
     return asyncio.shield(awaitable)
 
 
+GUEST_GLOBAL_KEY = "guestai:global:day"
+
+
+@dataclass
+class GuestAiReservation:
+    """A guest's question. Counters are given back only by `refund_unused` (nothing paid was called yet); once the
+    retrieval or the model may have been billed, `finish` keeps them, even if the client abandons the stream."""
+
+    limiter: Limiter
+    counted: list[str]  # the counter keys reserved, in order
+    slot_token: str
+    done: bool = False
+
+    async def _release(self) -> None:
+        await self.limiter.release(GLOBAL_SLOT_KEY, self.slot_token)
+
+    async def finish(self) -> None:
+        if self.done:
+            return
+        self.done = True
+        try:
+            await self._release()
+        except (RedisError, OSError):
+            logger.warning("Could not release a guest generation slot; it expires on its own")
+
+    async def refund_unused(self) -> None:
+        if self.done:
+            return
+        self.done = True
+        try:
+            for key in self.counted:
+                await self.limiter.refund(key)
+            await self._release()
+        except (RedisError, OSError):
+            logger.warning("Could not return a guest quota reservation; it expires on its own")
+
+
+def guest_status_keys(visitor: str, ip: str | None) -> dict[str, str]:
+    keys = {"visitor": f"guestai:visitor:{visitor}", "global": GUEST_GLOBAL_KEY}
+    if ip is not None:
+        keys["ip"] = f"guestai:ip:{ip}"
+    return keys
+
+
+async def reserve_guest_ai_question(limiter: Limiter, settings: Settings, visitor: str, ip: str | None) -> GuestAiReservation:
+    """429 (or 503 if Redis cannot be asked) before any retrieval or model call. Layers: this visitor, this address (only
+    if trustworthy), all guests, then the same shared daily budget and concurrency slots members use."""
+    s = settings
+    keys = guest_status_keys(visitor, ip)
+    layers = [
+        ("visitor", keys["visitor"], s.guest_ai_per_visitor_daily, f"You have used your {s.guest_ai_per_visitor_daily} free questions for today.", "guest_visitor"),
+    ]
+    if "ip" in keys:
+        layers.append(("ip", keys["ip"], s.guest_ai_per_ip_daily, "This network has used its free questions for today.", "guest_ip"))
+    layers += [
+        ("global", GUEST_GLOBAL_KEY, s.guest_ai_global_daily, "The free demo questions for today are used up.", "guest_global"),
+        ("shared", GLOBAL_DAY_KEY, s.ai_global_daily_limit, "RepoLens has reached its AI budget for today.", "global"),
+    ]
+    counted: list[str] = []
+    try:
+        for _name, key, limit, message, scope in layers:
+            await reserve_or_429(limiter, key, limit, DAY, message, scope)
+            counted.append(key)
+        try:
+            token = await limiter.acquire(GLOBAL_SLOT_KEY, s.ai_global_concurrency, s.ai_lease_seconds)
+        except (RedisError, OSError) as exc:
+            raise unavailable() from exc
+        if token is None:
+            raise too_many("RepoLens is answering many questions right now. Please try again in a few seconds.", 5, "busy")
+    except HTTPException:
+        for key in counted:
+            await _quiet_refund(limiter, key)
+        raise
+    return GuestAiReservation(limiter, counted, token)
+
+
 IMPORT_GLOBAL_KEY = "import:global:day"
 
 
@@ -165,6 +241,6 @@ async def check_total_repository_cap(db: AsyncSession, settings: Settings) -> No
 
 
 __all__ = [
-    "AiReservation", "reserve_ai_question", "reserve_import", "refund_import", "reserve_hourly", "refund_hourly",
+    "AiReservation", "reserve_ai_question", "GuestAiReservation", "reserve_guest_ai_question", "guest_status_keys", "GUEST_GLOBAL_KEY", "reserve_import", "refund_import", "reserve_hourly", "refund_hourly",
     "check_import_concurrency", "check_repository_cap", "check_total_repository_cap", "shielded", "wait_text",
 ]

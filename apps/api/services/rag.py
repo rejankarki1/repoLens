@@ -430,8 +430,11 @@ async def stream_events(
     *,
     generator: Generator,
     sessions: async_sessionmaker[AsyncSession] | Any,
+    persist: bool = True,
 ) -> AsyncIterator[str]:
     """Server-sent events: `retrieval`, then `token`s, then `done` (or `error`).
+
+    With `persist=False` (signed-out visitors) nothing is stored: `done` carries the same payload, with unsaved messages.
 
     The exchange is saved only after the whole answer arrived and was validated, using its own session
     (the request's may already be closed while the response streams). An error, a truncated answer or a
@@ -461,6 +464,13 @@ async def stream_events(
             raise
         final, model = finalize_answer("".join(pieces), prepared.sources, prepared.reference_paths), generator.model
     generation_ms = (time.perf_counter() - started) * 1000
+    if not persist:
+        unsaved = (
+            Message(conversation_id=prepared.conversation_id, role="user", content=prepared.question),
+            Message(conversation_id=prepared.conversation_id, role="assistant", content=final.text, citations=final.citations),
+        )
+        yield sse("done", exchange_payload(Exchange(*unsaved, final, prepared, model, prepared.retrieval_ms, generation_ms)))
+        return
     try:
         async with sessions() as db:
             user_message, assistant_message = await save_exchange(db, prepared.conversation_id, prepared.question, final)

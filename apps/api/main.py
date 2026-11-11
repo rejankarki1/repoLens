@@ -31,6 +31,7 @@ from apps.api.routes.architecture_diagram import router as architecture_diagram_
 from apps.api.routes.auth import router as auth_router
 from apps.api.routes.conversations import router as conversations_router
 from apps.api.routes.files import router as files_router
+from apps.api.routes.guest_ask import router as guest_ask_router
 from apps.api.routes.ingestions import router as ingestions_router
 from apps.api.routes.repositories import router as repositories_router
 from apps.api.routes.search import router as search_router
@@ -82,6 +83,7 @@ app.include_router(conversations_router)
 app.include_router(architecture_router)
 app.include_router(architecture_diagram_router)
 app.include_router(showcase_router)
+app.include_router(guest_ask_router)
 
 app.add_middleware(UnhandledErrorMiddleware)
 app.add_middleware(SecurityHeadersMiddleware, settings=settings)
