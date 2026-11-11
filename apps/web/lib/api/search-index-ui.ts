@@ -50,22 +50,27 @@ export function resumeIndexingAction(index: ApiSearchIndex | undefined): ResumeI
 
 export type IndexBadgeTone = 'success' | 'working' | 'warning' | 'muted'
 
+const KEYWORD_HINT = 'Questions are matched on exact words and names. Semantic search (matching by meaning) is not built for this repository.'
+
 /** A short label for repository lists: how searchable the repository is right now. Null until the status is known. */
-export function indexBadge(index: ApiSearchIndex | undefined): { label: string; tone: IndexBadgeTone } | null {
+export function indexBadge(index: ApiSearchIndex | undefined): { label: string; tone: IndexBadgeTone; hint: string } | null {
   if (!index) return null
-  if (index.chunks === 0) return { label: 'No code index', tone: 'warning' }
+  if (index.chunks === 0) return { label: 'No code index', tone: 'warning', hint: 'No searchable code is stored yet. Re-analyze the repository to build it.' }
   switch (index.semantic) {
     case 'ready':
-      return { label: 'Semantic index ready', tone: 'success' }
+      return { label: 'Semantic index ready', tone: 'success', hint: 'Questions are matched by meaning as well as by exact words, so answers find more relevant code.' }
     case 'partial':
       return {
         label: `Index ${index.embedded_chunks}/${index.chunks}`,
         tone: index.embedding_job_running ? 'working' : 'warning',
+        hint: 'The semantic index covers part of the code. Questions still work and use exact-word matching for the rest.',
       }
     case 'not_built':
-      return index.embedding_job_running ? { label: 'Indexing…', tone: 'working' } : { label: 'Keyword search', tone: 'muted' }
+      return index.embedding_job_running
+        ? { label: 'Indexing…', tone: 'working', hint: 'Building the semantic index. Questions use exact-word matching until it is ready.' }
+        : { label: 'Keyword search', tone: 'muted', hint: KEYWORD_HINT }
     case 'disabled':
-      return { label: 'Keyword search', tone: 'muted' }
+      return { label: 'Keyword search', tone: 'muted', hint: KEYWORD_HINT }
     default:
       return null
   }

@@ -31,7 +31,7 @@ try {
   // 1. A visitor: guest sidebar, nothing imported, sign-in offered.
   await d.goto(`${WEB}/repositories`, 2500)
   let page = await text(d)
-  check('visitor sees the guest sidebar with Continue with GitHub', /Browsing the demo/.test(page) && /Continue with GitHub/.test(page))
+  check('visitor sees the guest sidebar with Sign in with GitHub', /Browsing the demo/.test(page) && /Sign in with GitHub/.test(page))
   check('visitor has no repositories yet (empty showcase)', /No demo repositories yet/.test(page))
 
   // 2. Paste a URL as a visitor: sign-in prompt, nothing is imported.
@@ -40,8 +40,8 @@ try {
   check('pasting a repository as a visitor asks to sign in and names the repository', /Sign in to analyze octo\/demo/.test(page))
   check('no import was started for the visitor', (await (await fetch(`${API}/repositories`)).json()).length === 0)
 
-  // 3. Real click on Continue with GitHub (the prompt's button): OAuth with PKCE against the fake GitHub, then automatic import.
-  await d.clickOn(`(()=>[...document.querySelectorAll('[role=status] a')].find(a=>/Continue with GitHub/.test(a.innerText) && a.href.includes('import')))()`)
+  // 3. Real click on Sign in with GitHub (the prompt's button): OAuth with PKCE against the fake GitHub, then automatic import.
+  await d.clickOn(`(()=>[...document.querySelectorAll('[role=status] a')].find(a=>/Sign in with GitHub/.test(a.innerText) && a.href.includes('import')))()`)
   check('after sign-in the pasted repository opens its workspace', await d.waitFor(`/^\\/repos\\/\\d+$/.test(location.pathname)`, 30000), await d.ev('location.href'))
   const repoPath = await d.ev('location.pathname')
   check('the repository is downloaded and indexed by the worker', await waitIngested(), (await text(d)).slice(0, 200))
@@ -80,7 +80,7 @@ try {
   check('the showcase repository is listed for visitors', /octo\/demo/.test(page) && /browsing the demo/i.test(page))
   await d.goto(`${WEB}${repoPath}`, 2500)
   page = await text(d)
-  check('a visitor can open the showcase read-only (badge, no Re-analyze)', /Showcase · read-only/.test(page) && !/Re-analyze/.test(page))
+  check('a visitor can open the showcase read-only (badge, no Re-analyze)', /Demo · read-only/.test(page) && !/Re-analyze/.test(page))
   await d.goto(`${WEB}${repoPath}?tab=ask`, 2500)
   check('a visitor cannot use Ask AI', /Ask AI needs your own workspace/.test(await text(d)))
   await d.goto(`${WEB}${repoPath}?tab=code&file=app%2Fauth.py`, 3000)

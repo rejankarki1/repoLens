@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { PageShell, SectionHeading } from '@/components/page-shell'
 import { RepositoryImportForm } from '@/components/repository-import-form'
 import { RepositoryList } from '@/components/repository-list'
+import { StatusGuide } from '@/components/status-guide'
 
 export const metadata: Metadata = { title: 'Dashboard' }
 
@@ -14,8 +15,8 @@ export default function DashboardPage() {
           <h1 id="import-heading" className="text-2xl font-semibold tracking-tight">
             Analyze a repository
           </h1>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Paste a public GitHub URL to explore its code and architecture and ask questions that cite the exact lines.
+          <p className="max-w-3xl text-sm text-muted-foreground">
+            Paste a public GitHub URL. RepoLens indexes it so you can explore the code, see its architecture and ask questions with cited sources.
           </p>
         </div>
         <RepositoryImportForm />
@@ -29,7 +30,7 @@ export default function DashboardPage() {
               href="/repositories"
               className="rounded text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
             >
-              Manage repositories
+              All repositories
             </Link>
           }
         >
@@ -37,6 +38,8 @@ export default function DashboardPage() {
         </SectionHeading>
         <RepositoryList limit={6} />
       </section>
+
+      <StatusGuide />
     </PageShell>
   )
 }

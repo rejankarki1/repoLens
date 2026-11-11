@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { useRepositories } from '@/lib/api/hooks'
 import { useAuth } from '@/lib/auth/use-auth'
+import { sortByRecent } from '@/lib/recent-repos'
+import { useRecentlyOpened } from '@/lib/use-recently-opened'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
@@ -27,7 +29,8 @@ function RecentRepositories({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
   const { authenticated, loading } = useAuth()
   const { data } = useRepositories()
-  const repositories = (data ?? []).slice(0, 5)
+  const opened = useRecentlyOpened()
+  const repositories = sortByRecent(data ?? [], opened).slice(0, 5)
   if (loading || repositories.length === 0) return null
 
   return (

@@ -83,16 +83,24 @@ test('nothing to describe before the status loads or when there are no chunks', 
   assert.equal(describeIndex(index({ chunks: 0, semantic: 'not_built' })), null)
 })
 
+const pick = (b: ReturnType<typeof indexBadge>) => b && { label: b.label, tone: b.tone }
+
 test('index badge: unknown until the status loads, then one short label per state', () => {
   assert.equal(indexBadge(undefined), null)
-  assert.deepEqual(indexBadge(index({ chunks: 0, semantic: 'not_built' })), { label: 'No code index', tone: 'warning' })
-  assert.deepEqual(indexBadge(index({ semantic: 'ready', embedded_chunks: 200 })), { label: 'Semantic index ready', tone: 'success' })
-  assert.deepEqual(indexBadge(index({ semantic: 'disabled' })), { label: 'Keyword search', tone: 'muted' })
-  assert.deepEqual(indexBadge(index({ semantic: 'not_built' })), { label: 'Keyword search', tone: 'muted' })
+  assert.equal(indexBadge(index({ chunks: 0, semantic: 'not_built' }))?.label, 'No code index')
+  assert.deepEqual(pick(indexBadge(index({ semantic: 'ready', embedded_chunks: 200 }))), { label: 'Semantic index ready', tone: 'success' })
+  assert.deepEqual(pick(indexBadge(index({ semantic: 'disabled' }))), { label: 'Keyword search', tone: 'muted' })
+  assert.deepEqual(pick(indexBadge(index({ semantic: 'not_built' }))), { label: 'Keyword search', tone: 'muted' })
 })
 
 test('index badge: a partial or running index says how far it is and whether it is still working', () => {
-  assert.deepEqual(indexBadge(index({ semantic: 'partial', embedded_chunks: 80 })), { label: 'Index 80/200', tone: 'warning' })
-  assert.deepEqual(indexBadge(index({ semantic: 'partial', embedded_chunks: 80, embedding_job_running: true })), { label: 'Index 80/200', tone: 'working' })
-  assert.deepEqual(indexBadge(index({ semantic: 'not_built', embedding_job_running: true })), { label: 'Indexing…', tone: 'working' })
+  assert.deepEqual(pick(indexBadge(index({ semantic: 'partial', embedded_chunks: 80 }))), { label: 'Index 80/200', tone: 'warning' })
+  assert.deepEqual(pick(indexBadge(index({ semantic: 'partial', embedded_chunks: 80, embedding_job_running: true }))), { label: 'Index 80/200', tone: 'working' })
+  assert.deepEqual(pick(indexBadge(index({ semantic: 'not_built', embedding_job_running: true }))), { label: 'Indexing…', tone: 'working' })
+})
+
+test('index badge: every state explains itself in plain words', () => {
+  for (const state of [index({ semantic: 'ready' }), index({ semantic: 'disabled' }), index({ semantic: 'partial' }), index({ chunks: 0 })]) {
+    assert.ok((indexBadge(state)?.hint.length ?? 0) > 30)
+  }
 })

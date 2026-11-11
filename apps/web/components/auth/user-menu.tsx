@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { authErrorMessage } from '@/lib/auth/import-resume'
 import { useAuth } from '@/lib/auth/use-auth'
+import { clearRecentlyOpened } from '@/lib/use-recently-opened'
 
 /** A failed or cancelled sign-in can return to any page (`next` is wherever the visitor started from), not just
  * `/dashboard`. `/dashboard` already shows this itself (next to the import box, with its own query-string cleanup),
@@ -41,7 +42,7 @@ function GuestSignInError() {
   )
 }
 
-/** Bottom of the sidebar: a compact profile menu (profile, theme, sign out) or, for a visitor, Continue with GitHub. */
+/** Bottom of the sidebar: a compact profile menu (profile, theme, sign out) or, for a visitor, Sign in with GitHub. */
 export function UserMenu() {
   const { user, authenticated, loading, signOut } = useAuth()
   const { resolvedTheme, setTheme } = useTheme()
@@ -63,7 +64,7 @@ export function UserMenu() {
         <Suspense fallback={null}>
           <GuestSignInError />
         </Suspense>
-        <p className="text-xs text-muted-foreground">Browsing the demo. Sign in to analyze your own repositories and ask questions.</p>
+        <p className="text-xs text-muted-foreground">Browsing the demo. Sign in to analyze your own repositories.</p>
         <div className="flex items-center gap-2">
           <GitHubSignIn next={pathname === '/' ? '/dashboard' : pathname} size="sm" className="flex-1" />
           <ThemeToggle />
@@ -122,6 +123,7 @@ export function UserMenu() {
             disabled={leaving}
             onClick={async () => {
               setLeaving(true)
+              clearRecentlyOpened()
               await signOut()
               setLeaving(false)
             }}

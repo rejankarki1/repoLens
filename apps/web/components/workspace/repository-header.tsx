@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ExternalLink, GitBranch, GitCommitHorizontal, RefreshCw } from 'lucide-react'
 import { GitHubIcon } from '@/components/icons'
 import { IndexingProgressBar, IndexingStatus } from '@/components/indexing-status'
@@ -12,11 +12,17 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useRepository } from '@/lib/api/hooks'
 import { describeIngestionError, startIngestion } from '@/lib/api/client'
+import { markRepositoryOpened } from '@/lib/use-recently-opened'
 
 export function RepositoryHeader({ id }: { id: string }) {
   const { data: repo, isLoading } = useRepository(id)
   const [reanalyzing, setReanalyzing] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const member = repo?.viewerAccess === 'member'
+
+  useEffect(() => {
+    if (member) markRepositoryOpened(id)
+  }, [id, member])
 
   if (isLoading) {
     return (
@@ -100,7 +106,7 @@ export function RepositoryHeader({ id }: { id: string }) {
         <div className="ml-auto flex items-center gap-2">
           {repo.viewerAccess === 'guest' && (
             <span className="hidden rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground sm:inline">
-              Showcase · read-only
+              Demo · read-only
             </span>
           )}
           <Button
