@@ -159,7 +159,7 @@ RepoLens signs users in with a GitHub OAuth App. It asks for no scopes, so the t
 3. **Authorization callback URL**: the API's callback, exactly `<API_PUBLIC_URL>/auth/github/callback` (`http://localhost:8765/auth/github/callback` locally). GitHub only returns the browser to this URL.
 4. Create the app, then **Generate a new client secret**.
 5. Put the values in `.env.oauth-check` locally (the app reads it after `.env`), or in the production secret store when deployed. Never commit them, and never put them in `apps/web`: `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `API_PUBLIC_URL`, `WEB_BASE_URL`, `WEB_ORIGINS`. Use a separate OAuth App for production, with the production URLs.
-6. Restart the API. `GET /auth/me` now reports `github_login_enabled: true` and "Continue with GitHub" works.
+6. Restart the API. `GET /auth/me` now reports `github_login_enabled: true` and "Sign in with GitHub" works.
 
 To let visitors browse some repositories without signing in, import them first, then list them in `GUEST_SHOWCASE_REPOSITORIES` (`owner/name`, comma separated). Nothing is public unless it is listed.
 

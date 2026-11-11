@@ -33,7 +33,7 @@ export function RepositoryOverview({ repo }: { repo: Repository }) {
       href: `/repos/${repo.id}?tab=ask`, label: 'Ask AI', icon: MessageSquareText,
       hint: saved > 0 ? `${count(saved, 'saved conversation')}` : 'Questions with file citations',
     },
-    { href: `/repos/${repo.id}/graph`, label: 'Architecture', hint: 'How the modules depend on each other', icon: Network },
+    { href: `/repos/${repo.id}/graph`, label: 'Architecture', hint: 'An AI-identified diagram of its components', icon: Network },
   ]
 
   return (
@@ -121,13 +121,16 @@ function ArchitectureSummary({ repo }: { repo: Repository }) {
   const result = graph.data?.graph
   const open = (
     <Link href={`/repos/${repo.id}/graph`} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
-      Open the architecture map <ArrowRight className="size-3.5" aria-hidden="true" />
+      Open the AI-identified diagram <ArrowRight className="size-3.5" aria-hidden="true" />
     </Link>
   )
 
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-border p-4" aria-label="Architecture summary">
-      <h2 className="text-sm font-medium">Architecture</h2>
+      <div className="flex flex-col gap-0.5">
+        <h2 className="text-sm font-medium">Architecture</h2>
+        <p className="text-xs text-muted-foreground">These counts come from parsing the code&rsquo;s own imports. The diagram groups them into components.</p>
+      </div>
       {status.isLoading ? (
         <Skeleton className="h-16" />
       ) : status.error || !s ? (

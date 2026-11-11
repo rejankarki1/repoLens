@@ -54,7 +54,7 @@ test('a job is running even while technically "not_built" yet (first attempt in 
 // --- describeIndex: the "nothing appears above the question box" regression -----------------------------
 
 test('regression: a fully indexed repository still shows a status line (it used to render nothing at all)', () => {
-  assert.equal(describeIndex(index({ semantic: 'ready', embedded_chunks: 200, chunks: 200 })), 'Semantic index ready (200 chunks).')
+  assert.match(describeIndex(index({ semantic: 'ready', embedded_chunks: 200, chunks: 200 })) ?? '', /^Semantic index ready \(200 code chunks\)/)
 })
 
 test('regression: every loaded state with chunks shows a status line, a button, or both - never nothing', () => {
@@ -70,8 +70,8 @@ test('regression: every loaded state with chunks shows a status line, a button, 
 })
 
 test('partial status shows embedded/total progress, and says when a job is running', () => {
-  assert.match(describeIndex(index({ semantic: 'partial', embedded_chunks: 64 })) ?? '', /64 of 200 chunks\. /)
-  assert.match(describeIndex(index({ semantic: 'partial', embedded_chunks: 64, embedding_job_running: true })) ?? '', /64 of 200 chunks \(indexing…\)/)
+  assert.match(describeIndex(index({ semantic: 'partial', embedded_chunks: 64 })) ?? '', /64 of 200 code chunks\./)
+  assert.match(describeIndex(index({ semantic: 'partial', embedded_chunks: 64, embedding_job_running: true })) ?? '', /64 of 200 code chunks \(indexing…\)/)
 })
 
 test('a first build in progress is described as building, not as "not built yet"', () => {
@@ -83,16 +83,24 @@ test('nothing to describe before the status loads or when there are no chunks', 
   assert.equal(describeIndex(index({ chunks: 0, semantic: 'not_built' })), null)
 })
 
+const pick = (b: ReturnType<typeof indexBadge>) => b && { label: b.label, tone: b.tone }
+
 test('index badge: unknown until the status loads, then one short label per state', () => {
   assert.equal(indexBadge(undefined), null)
-  assert.deepEqual(indexBadge(index({ chunks: 0, semantic: 'not_built' })), { label: 'No code index', tone: 'warning' })
-  assert.deepEqual(indexBadge(index({ semantic: 'ready', embedded_chunks: 200 })), { label: 'Semantic index ready', tone: 'success' })
-  assert.deepEqual(indexBadge(index({ semantic: 'disabled' })), { label: 'Keyword search', tone: 'muted' })
-  assert.deepEqual(indexBadge(index({ semantic: 'not_built' })), { label: 'Keyword search', tone: 'muted' })
+  assert.equal(indexBadge(index({ chunks: 0, semantic: 'not_built' }))?.label, 'No code index')
+  assert.deepEqual(pick(indexBadge(index({ semantic: 'ready', embedded_chunks: 200 }))), { label: 'Semantic index ready', tone: 'success' })
+  assert.deepEqual(pick(indexBadge(index({ semantic: 'disabled' }))), { label: 'Keyword search', tone: 'muted' })
+  assert.deepEqual(pick(indexBadge(index({ semantic: 'not_built' }))), { label: 'Keyword search', tone: 'muted' })
 })
 
 test('index badge: a partial or running index says how far it is and whether it is still working', () => {
-  assert.deepEqual(indexBadge(index({ semantic: 'partial', embedded_chunks: 80 })), { label: 'Index 80/200', tone: 'warning' })
-  assert.deepEqual(indexBadge(index({ semantic: 'partial', embedded_chunks: 80, embedding_job_running: true })), { label: 'Index 80/200', tone: 'working' })
-  assert.deepEqual(indexBadge(index({ semantic: 'not_built', embedding_job_running: true })), { label: 'Indexing…', tone: 'working' })
+  assert.deepEqual(pick(indexBadge(index({ semantic: 'partial', embedded_chunks: 80 }))), { label: 'Index 80/200', tone: 'warning' })
+  assert.deepEqual(pick(indexBadge(index({ semantic: 'partial', embedded_chunks: 80, embedding_job_running: true }))), { label: 'Index 80/200', tone: 'working' })
+  assert.deepEqual(pick(indexBadge(index({ semantic: 'not_built', embedding_job_running: true }))), { label: 'Indexing…', tone: 'working' })
+})
+
+test('index badge: every state explains itself in plain words', () => {
+  for (const state of [index({ semantic: 'ready' }), index({ semantic: 'disabled' }), index({ semantic: 'partial' }), index({ chunks: 0 })]) {
+    assert.ok((indexBadge(state)?.hint.length ?? 0) > 30)
+  }
 })

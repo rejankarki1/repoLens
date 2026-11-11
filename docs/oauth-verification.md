@@ -107,7 +107,7 @@ Use a normal browser window for the signed-in user and a private window for visi
 
 **Login**
 - [ ] 6.1 As a visitor the sidebar says "Browsing as a guest" and the showcase repository is listed read-only; Ask AI and Re-analyze are not offered.
-- [ ] 6.2 "Continue with GitHub" goes to `github.com`, whose consent page lists **only public information** and no repository access. The address bar shows a `code_challenge` parameter and no `scope`.
+- [ ] 6.2 "Sign in with GitHub" goes to `github.com`, whose consent page lists **only public information** and no repository access. The address bar shows a `code_challenge` parameter and no `scope`.
 - [ ] 6.3 After approving, you land back on `http://localhost:3000/...` signed in, with your real GitHub avatar, name and `@login` in the sidebar.
 - [ ] 6.4 Cancel: sign out, start again and press **Cancel** on GitHub. You return signed out with "GitHub sign-in was cancelled."
 - [ ] 6.5 DevTools → Application → Cookies (`localhost`): `rl_session` is **HttpOnly**, SameSite **Lax**, no Domain; `document.cookie` in the console prints an empty string; Local and Session Storage are empty.

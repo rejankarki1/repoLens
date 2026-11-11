@@ -5,12 +5,12 @@ import { Button } from '@/components/ui/button'
 import { loginUrl } from '@/lib/auth/session'
 import { useAuth } from '@/lib/auth/use-auth'
 
-/** "Continue with GitHub": a plain link, so sign-in is a normal browser navigation (the API controls the whole flow). */
+/** "Sign in with GitHub": a plain link, so sign-in is a normal browser navigation (the API controls the whole flow). */
 export function GitHubSignIn({
   next,
   size = 'default',
   variant = 'default',
-  label = 'Continue with GitHub',
+  label = 'Sign in with GitHub',
   className,
 }: {
   /** Site-relative path to return to after signing in. */

@@ -11,6 +11,16 @@ const CONFIG: Record<IndexingState, { label: string; className: string; icon: ty
   failed: { label: 'Failed', className: 'text-destructive bg-destructive/10', icon: AlertCircle },
 }
 
+/** Plain-language meaning of each status, for tooltips and the in-app guide. */
+export const STATUS_HELP: Record<IndexingState, string> = {
+  pending: 'The source files have not been downloaded yet.',
+  queued: 'Waiting for the background worker to pick it up.',
+  importing: 'Downloading the repository from GitHub.',
+  indexing: 'Downloading and indexing the code. This usually takes about a minute and keeps running if you leave the page.',
+  completed: 'The code is stored and searchable. Ask AI, Explore Code and Architecture are ready.',
+  failed: 'The last ingestion failed. The reason is shown; you can try again.',
+}
+
 interface IndexingStatusProps {
   status: IndexingState
   progress?: number | null
@@ -25,6 +35,7 @@ export function IndexingStatus({ status, progress, className }: IndexingStatusPr
     <span
       className={cn('inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-xs font-medium', tone, className)}
       role="status"
+      title={STATUS_HELP[status]}
     >
       <Icon className={cn('size-3.5', spin && 'animate-spin')} aria-hidden="true" />
       {label}

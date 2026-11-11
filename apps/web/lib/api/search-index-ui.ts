@@ -14,15 +14,15 @@ export function describeIndex(index: ApiSearchIndex | undefined): string | null 
   if (!index || index.chunks === 0) return null
   switch (index.semantic) {
     case 'disabled':
-      return 'Semantic search is not configured, so answers use keyword matching.'
+      return 'Answers match on exact words and names, so use the names the code uses.'
     case 'not_built':
       return index.embedding_job_running
-        ? 'Building the semantic index… Answers use keyword matching until it is ready.'
-        : 'The semantic index has not been built yet. Answers use keyword matching, which works best with exact names.'
+        ? 'Building the semantic index (matching by meaning)… Until it is ready, answers match on exact words.'
+        : 'The semantic index is not built yet, so answers match on exact words and names. Build it to also match by meaning.'
     case 'partial':
-      return `Semantic index ${index.embedded_chunks} of ${index.chunks} chunks${index.embedding_job_running ? ' (indexing…)' : ''}. Questions still work and use keyword matching for the rest.`
+      return `Semantic index covers ${index.embedded_chunks} of ${index.chunks} code chunks${index.embedding_job_running ? ' (indexing…)' : ''}. Questions already work; uncovered code is matched on exact words.`
     case 'ready':
-      return `Semantic index ready (${index.chunks} chunks).`
+      return `Semantic index ready (${index.chunks} code chunks): questions are matched by meaning, not just exact words.`
     default:
       return null
   }
@@ -50,22 +50,27 @@ export function resumeIndexingAction(index: ApiSearchIndex | undefined): ResumeI
 
 export type IndexBadgeTone = 'success' | 'working' | 'warning' | 'muted'
 
+const KEYWORD_HINT = 'Questions are matched on exact words and names. Semantic search (matching by meaning) is not built for this repository.'
+
 /** A short label for repository lists: how searchable the repository is right now. Null until the status is known. */
-export function indexBadge(index: ApiSearchIndex | undefined): { label: string; tone: IndexBadgeTone } | null {
+export function indexBadge(index: ApiSearchIndex | undefined): { label: string; tone: IndexBadgeTone; hint: string } | null {
   if (!index) return null
-  if (index.chunks === 0) return { label: 'No code index', tone: 'warning' }
+  if (index.chunks === 0) return { label: 'No code index', tone: 'warning', hint: 'No searchable code is stored yet. Re-analyze the repository to build it.' }
   switch (index.semantic) {
     case 'ready':
-      return { label: 'Semantic index ready', tone: 'success' }
+      return { label: 'Semantic index ready', tone: 'success', hint: 'Questions are matched by meaning as well as by exact words, so answers find more relevant code.' }
     case 'partial':
       return {
         label: `Index ${index.embedded_chunks}/${index.chunks}`,
         tone: index.embedding_job_running ? 'working' : 'warning',
+        hint: 'The semantic index covers part of the code. Questions still work and use exact-word matching for the rest.',
       }
     case 'not_built':
-      return index.embedding_job_running ? { label: 'Indexing…', tone: 'working' } : { label: 'Keyword search', tone: 'muted' }
+      return index.embedding_job_running
+        ? { label: 'Indexing…', tone: 'working', hint: 'Building the semantic index. Questions use exact-word matching until it is ready.' }
+        : { label: 'Keyword search', tone: 'muted', hint: KEYWORD_HINT }
     case 'disabled':
-      return { label: 'Keyword search', tone: 'muted' }
+      return { label: 'Keyword search', tone: 'muted', hint: KEYWORD_HINT }
     default:
       return null
   }

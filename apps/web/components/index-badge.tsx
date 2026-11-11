@@ -15,7 +15,7 @@ export function IndexBadge({ index, className }: { index: ApiSearchIndex | undef
   const badge = indexBadge(index)
   if (!badge) return null
   return (
-    <span className={cn('inline-flex h-5 items-center gap-1 rounded px-1.5 text-[11px] font-medium', TONE[badge.tone], className)}>
+    <span title={badge.hint} className={cn('inline-flex h-5 items-center gap-1 rounded px-1.5 text-[11px] font-medium', TONE[badge.tone], className)}>
       {badge.tone === 'working' && <Loader2 className="size-3 animate-spin" aria-hidden="true" />}
       {badge.label}
     </span>

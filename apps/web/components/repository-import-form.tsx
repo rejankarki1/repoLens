@@ -151,10 +151,7 @@ function ImportForm() {
         <div role="status" className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm">
             <span className="font-medium">Sign in to analyze {signInFor.replace('https://github.com/', '')}.</span>{' '}
-            <span className="text-muted-foreground">
-              We only read your public GitHub profile to know who you are; nothing else is requested. Your pasted repository is
-              analyzed as soon as you return.
-            </span>
+            <span className="text-muted-foreground">We only read your public profile, and it starts analyzing as soon as you return.</span>
           </p>
           <GitHubSignIn next={resumePath(signInFor)} className="shrink-0" />
         </div>
