@@ -6,7 +6,7 @@ import { useEffect } from 'react'
 import { ArrowRight, LayoutDashboard } from 'lucide-react'
 import { GitHubSignIn } from '@/components/auth/github-sign-in'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { useRepositories } from '@/lib/api/hooks'
+import { useGuestAsk, useRepositories } from '@/lib/api/hooks'
 import { useAuth } from '@/lib/auth/use-auth'
 import { cn } from '@/lib/utils'
 
@@ -64,5 +64,19 @@ export function HeaderAction() {
     </Link>
   ) : (
     <GitHubSignIn next="/dashboard" size="sm" variant="outline" label="Sign in with GitHub" />
+  )
+}
+
+/** The line under the hero buttons. It promises live questions only when the server has them switched on. */
+export function HeroNote() {
+  const { data } = useRepositories()
+  const first = data?.[0]
+  const { data: guestAsk } = useGuestAsk(first?.id ?? '', !!first)
+  return (
+    <p className="max-w-xl text-xs text-muted-foreground">
+      {guestAsk?.enabled
+        ? `No account needed: ask up to ${guestAsk.limit} real questions a day about the demo repositories. Signing in only reads your public GitHub profile.`
+        : 'The demo needs no account. Signing in only reads your public GitHub profile.'}
+    </p>
   )
 }

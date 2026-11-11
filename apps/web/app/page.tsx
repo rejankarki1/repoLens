@@ -2,27 +2,37 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { FileSearch, ListChecks, MessageSquareText } from 'lucide-react'
 import { GitHubIcon, RepoLensLogo } from '@/components/icons'
-import { AuthRedirect, HeaderAction, HeroActions } from '@/components/landing/landing-actions'
+import { DemoLink } from '@/components/landing/demo-link'
+import { AuthRedirect, HeaderAction, HeroActions, HeroNote } from '@/components/landing/landing-actions'
 import { DemoRepositories } from '@/components/landing/demo-repositories'
 import { PAGE_WIDTH } from '@/components/page-shell'
 
 const SOURCE_URL = 'https://github.com/rejankarki1/repoLens'
 
 const STEPS = [
+  { icon: ListChecks, title: 'Add a repository', text: 'Paste a public GitHub URL.' },
+  { icon: FileSearch, title: 'It gets indexed', text: 'The code is split into searchable pieces and its imports are mapped.' },
+  { icon: MessageSquareText, title: 'Ask and check', text: 'Every answer cites the files and lines it came from.' },
+]
+
+const FEATURES = [
   {
-    icon: ListChecks,
-    title: 'Import a public repository',
-    text: 'Paste a GitHub URL. RepoLens downloads the source and splits the code into searchable pieces that follow the structure of each language.',
+    image: '/landing/architecture.png',
+    alt: 'The Architecture Explorer showing the Wanderlust repository as a diagram: a frontend application, a backend API with its routes, a database and Cloudinary, joined by arrows.',
+    title: 'See how the pieces connect',
+    text: 'An AI-identified diagram of a repository’s components. Pan and zoom, or select a component to see the real files behind it.',
+    repo: 'rejankarki1/wanderlust',
+    suffix: '/graph',
+    link: 'Open this diagram',
   },
   {
-    icon: FileSearch,
-    title: 'It is indexed for search',
-    text: 'Every piece is stored for keyword search and, when embeddings are enabled, meaning-based search. Imports between files become a dependency map.',
-  },
-  {
-    icon: MessageSquareText,
-    title: 'Ask, explore, check the sources',
-    text: 'Answers are written only from the retrieved code, and each one cites the files and lines it used so you can open them and verify.',
+    image: '/landing/code-explorer.png',
+    alt: 'The Code Explorer showing a file tree and the Wanderlust listings controller with the geocoding function highlighted, and a panel of what the file imports and what imports it.',
+    title: 'Browse the real source',
+    text: 'A file tree, highlighted code, and a panel showing what each file imports and what imports it. Citations from Ask AI open right here.',
+    repo: 'rejankarki1/wanderlust',
+    suffix: '?tab=code&file=backend%2Fcontrollers%2Fapi%2Flistings.js&lines=84-96',
+    link: 'Open this file',
   },
 ]
 
@@ -68,13 +78,13 @@ export default function Home() {
           <div className="flex flex-wrap items-center justify-center gap-3">
             <HeroActions />
           </div>
-          <p className="text-xs text-muted-foreground">The demo needs no account. Signing in only reads your public GitHub profile.</p>
+          <HeroNote />
 
           <figure className="w-full max-w-4xl">
             <div className="overflow-hidden rounded-xl border border-border bg-card shadow-lg">
               <Image
-                src="/landing/ask-ai.png"
-                alt="The RepoLens Ask AI screen: a question about a repository, an answer with numbered source tags, and the cited lines of code highlighted beside it."
+                src="/landing/ask-ai-wanderlust.png"
+                alt="The RepoLens Ask AI screen for the Wanderlust repository: the question “Where is the entry point?”, an answer with numbered source tags, and the cited lines of backend/server.js beside it."
                 width={1200}
                 height={900}
                 priority
@@ -82,17 +92,44 @@ export default function Home() {
               />
             </div>
             <figcaption className="mt-3 text-xs text-muted-foreground">
-              Ask AI answering a question about a real repository. Each source tag opens the cited lines.
+              Ask AI answering a question about Wanderlust, a real repository. Each source tag opens the cited lines.
             </figcaption>
           </figure>
         </section>
+
+        <section aria-labelledby="features-heading" className="flex flex-col gap-6">
+          <div className="flex flex-col gap-1.5">
+            <h2 id="features-heading" className="text-2xl font-semibold tracking-tight">
+              Check the answer in the code itself
+            </h2>
+            <p className="max-w-2xl text-muted-foreground">Ask AI shows its sources. Two more views let you follow them.</p>
+          </div>
+          <div className="grid gap-6 md:grid-cols-2">
+            {FEATURES.map(({ image, alt, title, text, repo, suffix, link }) => (
+              <figure key={title} className="flex flex-col gap-4">
+                <div className="overflow-hidden rounded-xl border border-border bg-card shadow-md">
+                  <Image src={image} alt={alt} width={1200} height={900} className="h-auto w-full" />
+                </div>
+                <figcaption className="flex flex-col gap-1.5">
+                  <h3 className="font-medium">{title}</h3>
+                  <p className="text-sm leading-relaxed text-muted-foreground">{text}</p>
+                  <DemoLink repo={repo} suffix={suffix}>
+                    {link}
+                  </DemoLink>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        </section>
+
+        <DemoRepositories />
 
         <section id="how-it-works" aria-labelledby="how-heading" className="flex scroll-mt-8 flex-col gap-6">
           <div className="flex flex-col gap-1.5">
             <h2 id="how-heading" className="text-2xl font-semibold tracking-tight">
               How RepoLens works
             </h2>
-            <p className="max-w-2xl text-muted-foreground">Three steps from a URL to answers you can check.</p>
+            <p className="max-w-2xl text-muted-foreground">From a URL to answers you can check.</p>
           </div>
           <ol className="grid gap-4 md:grid-cols-3">
             {STEPS.map(({ icon: Icon, title, text }, i) => (
@@ -109,8 +146,6 @@ export default function Home() {
             ))}
           </ol>
         </section>
-
-        <DemoRepositories />
       </main>
 
       <footer className="border-t border-border">
