@@ -2,16 +2,15 @@
 
 import { DemoRepositoryCard } from '@/components/demo-repository-card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useGuestAsk, useRepositories } from '@/lib/api/hooks'
-import { useAuth } from '@/lib/auth/use-auth'
+import { useGuestAsk, useShowcaseRepositories } from '@/lib/api/hooks'
 
-/** The demo repositories the server publishes (the guest showcase), read from the API. Hidden when there are none. */
+/** The demo repositories the server publishes (the guest showcase), read from the API. Hidden when there are
+ * none, for both guests and signed-in visitors — the landing page reads the same for everyone. */
 export function DemoRepositories() {
-  const { data, isLoading } = useRepositories()
-  const { authenticated } = useAuth()
+  const { data, isLoading } = useShowcaseRepositories()
   const first = data?.[0]
   const { data: guestAsk } = useGuestAsk(first?.id ?? '', !!first)
-  if (authenticated || (!isLoading && (!data || data.length === 0))) return null
+  if (!isLoading && (!data || data.length === 0)) return null
 
   return (
     <section id="demo" aria-labelledby="demo-heading" className="flex scroll-mt-8 flex-col gap-5">

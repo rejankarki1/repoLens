@@ -78,6 +78,21 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+/** Same as `request`, without the session cookie: the public showcase list, the same for everyone. */
+async function requestAnonymous<T>(path: string): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}${path}`, { credentials: 'omit' })
+  } catch {
+    throw new ApiError(0, `Could not reach the RepoLens API at ${API_URL}. Is the backend running?`)
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new ApiError(response.status, describeDetail(body?.detail, `Request failed (${response.status})`))
+  }
+  return response.json() as Promise<T>
+}
+
 /* --------------------------------- Adapters --------------------------------- */
 
 const STATUS_MAP: Record<ApiRepository['ingestion_status'], IndexingState> = {
@@ -116,6 +131,16 @@ function toRepository(api: ApiRepository): Repository {
 export async function listRepositories(): Promise<Repository[]> {
   const rows = await request<ApiRepository[]>('/repositories')
   // The API lists by ascending id; show the newest import first.
+  return rows.map(toRepository).reverse()
+}
+
+/**
+ * The two demo repositories, regardless of whether this browser happens to be signed in. `GET /repositories`
+ * already returns exactly this (the showcase allow-list) for anyone without a session; fetching it without
+ * the cookie gets the same list for a signed-in visitor too, without it counting as their own workspace.
+ */
+export async function listShowcaseRepositories(): Promise<Repository[]> {
+  const rows = await requestAnonymous<ApiRepository[]>('/repositories')
   return rows.map(toRepository).reverse()
 }
 
