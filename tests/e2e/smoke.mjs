@@ -48,7 +48,9 @@ try {
   page = await text(d)
   check('the sidebar shows the signed-in GitHub user, not a demo persona', /Alice Example/.test(page) && /@alice/.test(page) && !/Alex Doe/.test(page))
   check('the session cookie is HttpOnly and invisible to page scripts', (await d.ev('document.cookie')) === '' && (await d.cookies(API)).some((c) => c.name === 'rl_session' && c.httpOnly && c.sameSite === 'Lax'))
-  check('no tokens are kept in web storage', (await d.ev('JSON.stringify([Object.keys(localStorage), Object.keys(sessionStorage)])')) === '[[],[]]')
+  // The UI keeps two non-secret keys in localStorage: the theme and the recently-opened repository ids.
+  check('no tokens are kept in web storage', (await d.ev(`JSON.stringify([Object.keys(localStorage).filter(k=>!['theme','repolens:recently-opened'].includes(k)), Object.keys(sessionStorage)])`)) === '[[],[]]')
+  check('the recently-opened entry holds only repository ids and times', await d.ev(`(()=>{const v=localStorage.getItem('repolens:recently-opened');if(v===null)return true;const o=JSON.parse(v);return Object.entries(o).every(([k,t])=>/^\\d+$/.test(k)&&typeof t==='number')})()`))
   check('the pasted URL is no longer in the address bar', (await d.ev('location.search')) === '')
   await d.goto(`${WEB}${repoPath}?tab=ask`, 2500)
   check('a member sees the Ask AI composer', await d.ev(`!!document.querySelector('textarea[aria-label="Your question"], input[aria-label="Your question"]')`))

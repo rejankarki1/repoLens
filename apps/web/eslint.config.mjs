@@ -9,6 +9,8 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // The browser smoke test and one-off checks build into isolated dist dirs (see next.config.ts NEXT_DIST_DIR).
+    ".next-*/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

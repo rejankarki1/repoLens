@@ -58,7 +58,7 @@ export function RepositoryCard({ repository }: { repository: Repository }) {
   const { data: index } = useSearchIndex(viewerAccess === 'member' && status === 'completed' ? repository : undefined, { poll: false })
 
   return (
-    <li className="relative flex flex-col gap-2.5 rounded-lg border border-border bg-card px-4 py-3 transition focus-within:border-primary/40 hover:border-primary/40 hover:bg-accent/30 focus-within:bg-accent/30">
+    <li className="relative flex min-w-0 flex-col gap-2.5 rounded-lg border border-border bg-card px-4 py-3 transition focus-within:border-primary/40 hover:border-primary/40 hover:bg-accent/30 focus-within:bg-accent/30">
       <div className="flex items-center justify-between gap-3">
         <Link
           href={`/repos/${id}`}
