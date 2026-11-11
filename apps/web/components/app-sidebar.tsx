@@ -10,7 +10,9 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { useRepositories } from '@/lib/api/hooks'
 import { useAuth } from '@/lib/auth/use-auth'
+import { demoDescription } from '@/lib/demo-repo-descriptions'
 import { sortByRecent } from '@/lib/recent-repos'
+import type { Repository } from '@/lib/types'
 import { useRecentlyOpened } from '@/lib/use-recently-opened'
 import { cn } from '@/lib/utils'
 
@@ -24,6 +26,33 @@ const LINK =
 const ACTIVE = 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
 const IDLE = 'text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground'
 
+/** One repository row: a small icon, its name, status, and (only when one is known, i.e. the two demo
+ * repositories) a one-line description — the same row shape for both the signed-in "Recent" list and the
+ * guest "Demo repositories" list, so the two read as one consistent piece of navigation. */
+function RepositoryNavItem({ repo, active, onNavigate }: { repo: Repository; active: boolean; onNavigate?: () => void }) {
+  const working = repo.status === 'queued' || repo.status === 'importing' || repo.status === 'indexing'
+  const about = demoDescription(repo.fullName)
+  return (
+    <Link
+      href={`/repos/${repo.id}`}
+      title={repo.fullName}
+      onClick={onNavigate}
+      aria-current={active ? 'page' : undefined}
+      className={cn('flex items-start gap-2 rounded-md px-2.5 py-1.5 transition-colors', 'focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40', active ? ACTIVE : IDLE)}
+    >
+      <FolderGit2 className="mt-0.5 size-3.5 shrink-0 opacity-70" aria-hidden="true" />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="min-w-0 flex-1 truncate text-[0.8125rem]">{repo.name}</span>
+          {working && <Loader2 className="size-3.5 shrink-0 animate-spin text-warning" aria-label="Ingesting" />}
+          {repo.status === 'failed' && <AlertCircle className="size-3.5 shrink-0 text-destructive" aria-label="Ingestion failed" />}
+        </span>
+        {about && <span className="block truncate text-[11px] text-muted-foreground/70">{about.summary}</span>}
+      </span>
+    </Link>
+  )
+}
+
 /** The newest repositories, from the list the other screens already load (no extra request). A visitor sees the demo set. */
 function RecentRepositories({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
@@ -35,25 +64,15 @@ function RecentRepositories({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <nav aria-label={authenticated ? 'Recent repositories' : 'Demo repositories'} className="flex flex-col gap-0.5 px-2 pb-2">
-      <p className="px-2.5 pb-1 text-xs font-medium text-muted-foreground">{authenticated ? 'Recent' : 'Demo'}</p>
-      {repositories.map((repo) => {
-        const active = pathname === `/repos/${repo.id}` || pathname.startsWith(`/repos/${repo.id}/`)
-        const working = repo.status === 'queued' || repo.status === 'importing' || repo.status === 'indexing'
-        return (
-          <Link
-            key={repo.id}
-            href={`/repos/${repo.id}`}
-            title={repo.fullName}
-            onClick={onNavigate}
-            aria-current={active ? 'page' : undefined}
-            className={cn(LINK, 'h-7 text-[0.8125rem]', active ? ACTIVE : IDLE)}
-          >
-            <span className="min-w-0 flex-1 truncate">{repo.name}</span>
-            {working && <Loader2 className="size-3.5 shrink-0 animate-spin text-warning" aria-label="Ingesting" />}
-            {repo.status === 'failed' && <AlertCircle className="size-3.5 shrink-0 text-destructive" aria-label="Ingestion failed" />}
-          </Link>
-        )
-      })}
+      <p className="px-2.5 pb-1 text-xs font-medium text-muted-foreground">{authenticated ? 'Recent' : 'Demo repositories'}</p>
+      {repositories.map((repo) => (
+        <RepositoryNavItem
+          key={repo.id}
+          repo={repo}
+          active={pathname === `/repos/${repo.id}` || pathname.startsWith(`/repos/${repo.id}/`)}
+          onNavigate={onNavigate}
+        />
+      ))}
     </nav>
   )
 }
