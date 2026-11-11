@@ -78,3 +78,39 @@ Final verification: unit 120/120, lint clean, tsc clean, production build compil
 - Architecture "1 generation warning" stays quiet by design; minimap placement unchanged.
 - Code Explorer tree does not auto-scroll to a file opened via citation link (minor; low risk to touch).
 - Landing screenshots are dark-theme captures framed on both themes (deliberate).
+
+
+## Follow-up pass — guest/member dashboard separation (commit: see git log)
+
+Guest and signed-in `/dashboard` were the same page with a label swapped underneath ("Analyze a
+repository" shown even to visitors who cannot analyze anything without signing in; "Recent
+repositories" shown even though nothing had ever been opened). Split into two real screens:
+
+- **New `GuestDashboard`** (`components/guest-dashboard.tsx`): "Demo repositories" heading leads,
+  with the two showcase repositories as full `DemoRepositoryCard`s (description, stack, Demo badge,
+  Ask AI primary). "Import your own repository" is a secondary, visually separated section below it
+  with a **Sign in with GitHub** button in its own heading (shown up front, not only after a paste
+  fails) plus the existing paste form, unchanged, so the sign-in-after-paste resume flow still works.
+- **New `MemberDashboard`** (`components/member-dashboard.tsx`): the previous content, unchanged,
+  heading fixed to always say "Recent repositories" (previously the same literal string was used for
+  guests too, who have no "recent" anything).
+- **New `DashboardView`** (`components/dashboard-view.tsx`): picks between them once `useAuth()`
+  resolves; `page.tsx` is back to a thin server component with just the route's metadata.
+- **`RepositoryList` simplified**: it is now only ever rendered for a signed-in member (the guest
+  branch, `guestNotice`, and the "no demo repositories" copy it carried are gone — dead code once
+  `DashboardView` stopped routing guests through it).
+- **New shared `DemoRepositoryCard`** (`components/demo-repository-card.tsx`) and
+  **`lib/demo-repo-descriptions.ts`**: the repository description/stack text and the card that shows
+  it now live in one place, used by both the landing page and the guest dashboard, so the two
+  describe the showcase the same way. `components/landing/demo-repositories.tsx` now delegates to it
+  instead of carrying its own copy of the same card.
+- **`RepositoryCard` (member cards)**: reordered to put search-readiness (`IndexBadge`) and the
+  ingested time first; branch and commit moved to a de-emphasized, right-aligned, muted group at the
+  end of the row. Added a quiet "opened 3h ago" indicator (History icon) next to the status badge,
+  shown only for a repository this browser has actually opened — makes "recent access" visible on the
+  card itself, not just the sort order.
+
+Verified: guest dashboard, member dashboard (with a genuinely-recent repository showing its "opened
+Xago" tag), new-user empty state, and Repositories (regression) at 1440 dark/light and 390 dark — no
+overflow, no visual regression on unrelated screens. Full suite: 120/120 unit tests, lint clean, tsc
+clean, production build compiled, browser smoke 31/31.

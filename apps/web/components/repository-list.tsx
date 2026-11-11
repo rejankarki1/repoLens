@@ -1,20 +1,17 @@
 'use client'
 
 import { ArrowRight, ListChecks, MessageSquareText, RefreshCw, ScanSearch } from 'lucide-react'
-import { GitHubSignIn } from '@/components/auth/github-sign-in'
 import { RepositoryCard } from '@/components/repository-card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRepositories } from '@/lib/api/hooks'
-import { useAuth } from '@/lib/auth/use-auth'
 import { sortByRecent } from '@/lib/recent-repos'
 import { useRecentlyOpened } from '@/lib/use-recently-opened'
 
-/** The newest repositories as cards (Dashboard). The full management list lives on the Repositories page. */
+/** The repositories you most recently opened (Dashboard, signed in). Only ever rendered for a signed-in
+ * member: `/dashboard` picks `GuestDashboard` instead for a visitor, so there is no guest state to handle here. */
 export function RepositoryList({ limit }: { limit?: number }) {
   const { data, error, isLoading, isValidating, mutate } = useRepositories()
-  const { authenticated, loading: authLoading } = useAuth()
-  const guest = !authLoading && !authenticated
   const opened = useRecentlyOpened()
 
   if (isLoading) {
@@ -45,36 +42,14 @@ export function RepositoryList({ limit }: { limit?: number }) {
 
   const repositories = sortByRecent(data ?? [], opened).slice(0, limit)
 
-  const guestNotice = guest && (
-    <div role="note" className="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-sm text-muted-foreground">
-        <span className="font-medium text-foreground">You are browsing the demo.</span> These repositories are open to everyone to explore.
-        Sign in with GitHub to analyze your own and ask questions.
-      </p>
-      <GitHubSignIn next="/dashboard" size="sm" className="shrink-0" />
-    </div>
-  )
-
-  if (repositories.length === 0) {
-    return guest ? (
-      <div className="flex flex-col gap-3">
-        {guestNotice}
-        <p className="text-sm text-muted-foreground">No demo repositories are available on this server yet.</p>
-      </div>
-    ) : (
-      <GettingStarted />
-    )
-  }
+  if (repositories.length === 0) return <GettingStarted />
 
   return (
-    <div className="flex flex-col gap-3">
-      {guestNotice}
-      <ul className="grid items-start gap-3 md:grid-cols-2">
-        {repositories.map((repo) => (
-          <RepositoryCard key={repo.id} repository={repo} />
-        ))}
-      </ul>
-    </div>
+    <ul className="grid items-start gap-3 md:grid-cols-2">
+      {repositories.map((repo) => (
+        <RepositoryCard key={repo.id} repository={repo} openedAt={opened[repo.id]} />
+      ))}
+    </ul>
   )
 }
 
