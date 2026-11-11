@@ -138,6 +138,8 @@ def main() -> int:
         return p
 
     profile = ROOT / ".e2e-chrome-profile"
+    web_dist = ".next-e2e"  # a private build directory: the developer's `.next` (and any server using it) is never touched
+    web_env = {"NEXT_DIST_DIR": web_dist}
     try:
         asyncio.run(recreate_database(db_name))
         subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=ROOT, env=env, check=True, capture_output=True)
@@ -145,8 +147,8 @@ def main() -> int:
         start([sys.executable, "-m", "tests.e2e.fake_github", "--port", str(gh)])
         start([sys.executable, "-m", "uvicorn", "apps.api.main:app", "--port", str(api)])
         start([sys.executable, "-m", "apps.api.worker"])
-        subprocess.run(["npm", "run", "build"], cwd=ROOT / "apps/web", env=env, check=True, capture_output=True)
-        start(["npx", "next", "start", "-p", str(web)], cwd=ROOT / "apps/web")
+        subprocess.run(["npm", "run", "build"], cwd=ROOT / "apps/web", env={**env, **web_env}, check=True, capture_output=True)
+        start(["npx", "next", "start", "-p", str(web)], cwd=ROOT / "apps/web", **web_env)
         start([chrome(), "--headless=new", f"--remote-debugging-port={cdp}", f"--user-data-dir={profile}", "--no-first-run",
                "--no-default-browser-check", "--disable-extensions", "--no-sandbox", "--window-size=1440,900", "about:blank"])
         wait_for(f"http://localhost:{api}/health/ready")
@@ -166,6 +168,7 @@ def main() -> int:
             except subprocess.TimeoutExpired:
                 p.kill()
         shutil.rmtree(profile, ignore_errors=True)
+        shutil.rmtree(ROOT / "apps/web" / web_dist, ignore_errors=True)
         try:
             release_redis(redis)
         except Exception as exc:  # best effort
