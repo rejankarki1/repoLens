@@ -238,6 +238,9 @@ const DRAG_THRESHOLD = 4
 // large, dense graph they are unreadable anyway and only add visual noise; they return as soon as the user
 // zooms in enough to read them.
 const DECLUTTER_SCALE = 0.75
+// Above this many relationships, labels stay hidden at every zoom level - a dense diagram reads more clearly
+// with most labels off than with all of them competing for space at once.
+const DENSE_RELATIONSHIP_COUNT = 14
 const MINIMAP_SIZE = { w: 176, h: 128 }
 const WHEEL_ZOOM_SENSITIVITY = 0.01
 const DOUBLE_CLICK_MS = 400
@@ -264,6 +267,10 @@ function DiagramCanvas({
   const transformRef = useRef<Transform>({ x: 0, y: 0, scale: 1 })
   const [transform, setTransformState] = useState<Transform>({ x: 0, y: 0, scale: 1 })
   const [fitted, setFitted] = useState(false)
+  // True once a fit-to-view found the whole diagram would not fit at a readable scale (clampedFitScale held
+  // at READABLE_SCALE and let it overflow) — lets the UI explain why the view looks "zoomed in" on first
+  // load, instead of that reading as an accident.
+  const [overflowing, setOverflowing] = useState(false)
   const [animate, setAnimate] = useState(false)
   const [renderError, setRenderError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -314,6 +321,9 @@ function DiagramCanvas({
       userMoved.current = false
       setTransform({ ...placement, scale }, smooth)
       setFitted(true)
+      // The unclamped scale tells us whether the floor actually held (the diagram is larger than fits
+      // legibly) — same inputs `clampedFitScale` already used, just without its floor/ceiling.
+      setOverflowing(fitScaleFor({ w, h }, vw, vh, FIT_PADDING) < READABLE_SCALE)
     },
     [setTransform],
   )
@@ -593,12 +603,14 @@ function DiagramCanvas({
     }
   }, [])
 
-  // Dim everything not connected to the selected node, and reduce label clutter below DECLUTTER_SCALE.
-  // Visual-only DOM styling: never touches the generated diagram's nodes, edges or labels.
+  // Dim everything not connected to the selected node, and reduce label clutter below DECLUTTER_SCALE (or,
+  // for a graph with many relationships, regardless of zoom - a dense diagram reads better with most labels
+  // hidden by default). Visual-only DOM styling: never touches the generated diagram's nodes, edges or labels.
   useEffect(() => {
     const container = containerRef.current
     if (!container || !fitted) return
-    const declutter = transform.scale < DECLUTTER_SCALE
+    const dense = lr.edgeEndpoints.length > DENSE_RELATIONSHIP_COUNT
+    const declutter = transform.scale < DECLUTTER_SCALE || dense
     for (const label of container.querySelectorAll<HTMLElement>('.edgeLabel, .edgeLabels')) {
       label.style.opacity = declutter ? '0' : ''
       label.style.transition = 'opacity 120ms ease-out'
@@ -659,6 +671,9 @@ function DiagramCanvas({
             Showing commit <code className="font-mono text-foreground">{shortSha(status.generated_commit_sha)}</code>
             {status.generated_at && <> · generated {formatRelativeTime(status.generated_at)}</>}
           </span>
+          {overflowing && !selected && (
+            <span className="text-muted-foreground/80">· larger than fits at a readable zoom — drag or use the minimap to see the rest</span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           {onRegenerate && (

@@ -114,3 +114,36 @@ Verified: guest dashboard, member dashboard (with a genuinely-recent repository 
 Xago" tag), new-user empty state, and Repositories (regression) at 1440 dark/light and 390 dark — no
 overflow, no visual regression on unrelated screens. Full suite: 120/120 unit tests, lint clean, tsc
 clean, production build compiled, browser smoke 31/31.
+
+## Architecture Explorer pass (commit: see git log)
+
+Audited both architecture systems end-to-end (deterministic import graph vs. the AI-generated component
+diagram actually shown at `/repos/{id}/graph`) and confirmed, for both demo repositories, that the
+`generator_version`/`source_analyzer_version`/commit all match current code in both the local review clone
+and production — **the diagrams are not stale**; any perceived "demo looks worse" is generation-quality
+variance (wanderlust's stored diagram is genuinely sparser, 14 components/6 relationships), not a
+guest-vs-member rendering difference (the canvas, data and hooks are identical for both).
+
+Scope was deliberately kept small on request — no regeneration, no prompt changes, no new abstractions:
+
+- **`diagram-view.tsx`**: a diagram whose natural "fit everything" scale falls below the existing 0.55
+  legibility floor now shows a one-line hint ("larger than fits at a readable zoom — drag or use the
+  minimap") instead of silently clamping and overflowing with no explanation. A diagram with more than 14
+  relationships now hides edge labels at every zoom level, not only below the existing 0.75 declutter
+  threshold (dense diagrams read more clearly with labels off by default). Pan, zoom, minimap, node
+  selection/dimming and the component panel are unchanged.
+- **`repository-overview.tsx`**: the Overview tab's "Architecture" quick action and "Open the architecture
+  map" link described a dependency graph; both now accurately describe what `/graph` actually shows (the
+  AI-identified component diagram), with a one-line caption distinguishing the real deterministic counts
+  shown on this tab from the AI diagram the link opens.
+- **`docs/architecture-diagram.md`**: rewritten from a stale "Phase 2, no table/route/UI yet" framing (this
+  has been live for a while) to describe the real storage/route/UI, plus a short "known limitations" section
+  (generation quality depends on the deterministic analysis and is non-deterministic model output; the
+  output-token cap).
+
+Verified: typecheck, lint and the 120-test unit suite pass; visually confirmed guest and signed-in
+Architecture Explorer for both wanderlust and classLens (pan/zoom/minimap/legend/selection/details panel
+unchanged, no overflow or dense-label case triggered by either repo's own diagram, which is expected — both
+are small enough to fit naturally). A pre-existing, unrelated Mermaid-internal console warning
+(`tooltipElem.transition is not a function`, previously investigated and traced to an unused diagram-type
+chunk, not this app's code) still appears in headless capture and was left alone.
