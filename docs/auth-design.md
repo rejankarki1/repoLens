@@ -110,6 +110,7 @@ Production start-up validation (secure cookies, HTTPS web URL, OAuth credentials
 | DELETE | `/repositories/{id}` | member + CSRF | Removes it from your workspace with your conversations about it. The stored copy is deleted only if nobody else is a member and it is not in the showcase; 409 while ingestion (or, if the copy would be deleted, other jobs) is running. GitHub is never contacted. |
 | GET | `/repositories/{id}` and its `files`, `files/content`, `ingestion-status`, `architecture*`, `showcase-answers` | member, or anyone for showcase repositories | Read-only. `showcase-answers` are curated, saved answers: no AI call. |
 | POST | `/repositories/{id}/ingestions`, `/embeddings`, `/architecture` | member + CSRF | Background jobs; hourly and concurrency limits. |
+| GET, POST | `/repositories/{id}/guest-ask`, `/guest-ask/stream` | anyone, showcase repositories only, when `GUEST_AI_ENABLED`; the POST needs an allowed `Origin` | Status (remaining questions, no cookie, no count) and one stateless streamed question. Counted per visitor cookie, per trustworthy IP and for all guests per day, then the shared AI budget and slots. Nothing is saved. |
 | GET | `/repositories/{id}/search`, `/search-index` | member | Hybrid search spends embedding quota. |
 | * | `/repositories/{id}/conversations...` | member (owner of the conversation) + CSRF for writes | Questions are subject to the AI quotas. |
 

@@ -94,6 +94,17 @@ No code or authorization change is needed; the existing showcase allow-list does
 
 Result: signed-out visitors can browse repositories, Code Explorer, architecture, cached diagrams and the published example answers, read-only, rate-limited per IP. **Security implications:** only listed repositories are readable without sign-in, and they are public GitHub repositories anyway; everything else still returns 401/404. Ask AI, search, conversations and any job that spends AI budget stay member-only: a signed-in visitor clicks "Add to my repositories" (free for stored repositories) and then asks questions against your shared embeddings, subject to their personal and the global quotas. A member of a showcase repository can also re-trigger its diagram (within `ARCHITECTURE_DIAGRAM_HOURLY_LIMIT`), which replaces the cached one; keep that limit low. The Wanderlust fixture under `apps/web/public/dev-fixtures/` is a static development file and is not part of this flow.
 
+## Free questions for visitors (optional, off by default)
+
+Signed-out visitors can ask a few live questions about the showcase repositories, answered by the same retrieval and model as members, with the same citations. Nothing is saved, and every other write (import, indexing, deletion, conversations) stays member-only. The saved example answers are always shown and never call the AI.
+
+Enable it only after the showcase works: set `GUEST_AI_ENABLED=true` on Render (needs `GROQ_API_KEY`/`GEMINI_API_KEY` as for members) and redeploy. Defaults: `GUEST_AI_PER_VISITOR_DAILY=3`, `GUEST_AI_PER_IP_DAILY=30`, `GUEST_AI_GLOBAL_DAILY=20`. Turn it off again by unsetting it. The shared `AI_GLOBAL_DAILY_LIMIT` and `AI_GLOBAL_CONCURRENCY` also apply, so the worst daily guest spend is `GUEST_AI_GLOBAL_DAILY` questions.
+
+- **Visitor cookie**: `__Host-rl_visitor` (Secure, HttpOnly, SameSite=Lax, Path=/), issued by the API on a visitor's first question and passed through the Vercel rewrite like the session cookie. Clearing it gives a visitor a new allowance, which is why the all-visitors cap exists.
+- **Per-IP cap**: used only when the client address can be believed. Leave `TRUSTED_PROXIES` empty (the default) and it is skipped; the visitor and all-visitors caps then do the work. Do not set `FORWARDED_ALLOW_IPS`. Checked locally: `next start`'s rewrite forwards a client-supplied `X-Forwarded-For` to the API unchanged, so the header proves nothing unless every hop is yours; Vercel's own behaviour could not be verified here. Set `TRUSTED_PROXIES` only to address ranges you have confirmed for both Vercel's egress and Render's proxy; otherwise the "client" would be a shared proxy address.
+- **Refunds**: a question that is refused (any cap, missing Origin, repository not indexed) costs nothing. Once retrieval has started, the question stays counted even if the answer fails or the visitor closes the tab.
+- **Redis down**: guest questions are refused (503); the saved examples and browsing keep working.
+
 ## Smoke test after deploying
 
 1. `https://<svc>.onrender.com/health` → `{"status":"ok"}`; `/health/ready` → database and redis `ok` (the first request after idle takes ~50 s: cold start).

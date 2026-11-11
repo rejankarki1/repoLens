@@ -18,7 +18,7 @@ from apps.api.config import Settings
 from apps.api.core.auth import settings_dep
 from apps.api.core.database import get_db
 from apps.api.core.limits import (
-    get_limiter, require_allowed_origin, set_visitor_cookie, trustworthy_client_ip, unavailable, visitor_id,
+    get_limiter, guest_read_limit, require_allowed_origin, set_visitor_cookie, trustworthy_client_ip, unavailable, visitor_id,
 )
 from apps.api.models.entities import Conversation, Repository
 from apps.api.routes.conversations import _prepare, _question, _require_generator, get_sessions
@@ -63,6 +63,7 @@ async def guest_ask_status(
     settings: Settings = Depends(settings_dep),
     limiter: Limiter = Depends(get_limiter),
     generator: Generator | None = Depends(get_generator),
+    _guest_limit: None = Depends(guest_read_limit),
 ) -> GuestAskStatus:
     """What the composer shows. Counts nothing and sets no cookie. `enabled` is False (never an error) when guests cannot ask."""
     response.headers["Cache-Control"] = "no-store"
