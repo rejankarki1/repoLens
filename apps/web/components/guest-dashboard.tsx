@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 import { DemoRepositoryCard } from '@/components/demo-repository-card'
-import { GitHubSignIn } from '@/components/auth/github-sign-in'
 import { PageShell, SectionHeading } from '@/components/page-shell'
 import { RepositoryImportForm } from '@/components/repository-import-form'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -11,8 +10,9 @@ import { useRepositories } from '@/lib/api/hooks'
 
 /**
  * What a visitor sees on `/dashboard`: the two demo repositories, front and center, with their own Ask AI /
- * Explore Code / Architecture actions; importing a repository of your own is a secondary action below it,
- * with sign-in offered up front rather than only after a paste fails.
+ * Explore Code / Architecture actions; importing a repository of your own is a secondary action below it.
+ * Sign-in is not pitched up front — `RepositoryImportForm` offers it contextually, once a guest pastes a
+ * URL, so there is never more than one sign-in prompt on screen at a time.
  */
 export function GuestDashboard() {
   const { data, isLoading } = useRepositories()
@@ -49,13 +49,8 @@ export function GuestDashboard() {
       </section>
 
       <section aria-labelledby="import-heading" className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-5">
-        <SectionHeading id="import-heading" action={<GitHubSignIn next="/dashboard" size="sm" />}>
-          Import your own repository
-        </SectionHeading>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          Sign in with GitHub to analyze any public repository, ask your own questions without the daily guest limit, and keep a
-          private workspace. We only read your public profile.
-        </p>
+        <SectionHeading id="import-heading">Import your own repository</SectionHeading>
+        <p className="max-w-2xl text-sm text-muted-foreground">Paste a public GitHub URL to analyze it.</p>
         <RepositoryImportForm />
       </section>
 
