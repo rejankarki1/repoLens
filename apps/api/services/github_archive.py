@@ -9,7 +9,6 @@ from __future__ import annotations
 import re
 import tempfile
 import zipfile
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
@@ -168,8 +167,3 @@ class GitHubArchiveService:
             raise
         return path
 
-
-async def get_archive_service() -> AsyncIterator[GitHubArchiveService]:
-    """FastAPI dependency: a request-scoped `GitHubArchiveService`, closed after the request."""
-    async with GitHubArchiveService() as service:
-        yield service

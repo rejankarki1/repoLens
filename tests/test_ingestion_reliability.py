@@ -15,7 +15,7 @@ import pytest
 from redis import Redis
 from redis.exceptions import RedisError
 from rq import Queue
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import get_settings

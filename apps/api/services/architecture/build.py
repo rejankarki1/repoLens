@@ -19,7 +19,7 @@ from apps.api.schemas.architecture import (
 from apps.api.services.architecture.extract import IMPORTS, LAZY, REEXPORTS, REQUIRES, TYPE_ONLY, ExtractionError, ImportExtractor
 from apps.api.services.architecture.resolve import HEURISTIC, VERIFIED, Resolver
 from apps.api.services.architecture.signals import (
-    AREA_LABEL, ROLE_AREA, ROLE_ORDER, RoleHit, Signals, detect_technologies, parse_manifests,
+    AREA_LABEL, ROLE_AREA, RoleHit, Signals, detect_technologies, parse_manifests,
 )
 from apps.api.services.code_parser import language_for_path
 

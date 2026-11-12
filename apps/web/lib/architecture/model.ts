@@ -2,7 +2,7 @@
  * View-model helpers for the architecture explorer. Pure functions over the Phase 7A API types; nothing here
  * creates data the backend did not return (every path, line range and edge shown comes from the response).
  */
-import type { AnalysisStatus, Cycle, Evidence, Graph, GraphEdge, GraphNode, NodeDetail } from '@/lib/api/architecture'
+import type { AnalysisStatus, Evidence, Graph, GraphEdge, GraphNode, NodeDetail } from '@/lib/api/architecture'
 
 export const STATUS_POLL_MS = 2_000
 
@@ -255,15 +255,6 @@ export function moduleRelations(graph: Graph, moduleId: string): { out: GraphEdg
     out: graph.edges.filter((e) => e.source === moduleId).sort(strongest),
     in: graph.edges.filter((e) => e.target === moduleId).sort(strongest),
   }
-}
-
-export function findCycle(cycles: Cycle[][], id: string | null): Cycle | null {
-  if (!id) return null
-  for (const list of cycles) {
-    const found = list.find((c) => c.id === id)
-    if (found) return found
-  }
-  return null
 }
 
 export const RELATIONSHIP_LABEL: Record<string, string> = {

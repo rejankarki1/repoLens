@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.config import get_settings
 from apps.api.models.entities import Repository
 from apps.api.services.architecture import store as architecture_store
 from apps.api.services.architecture_diagram.context import (
