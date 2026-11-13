@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useFile, useFileTree } from '@/lib/api/hooks'
+import { shouldHighlight } from '@/lib/highlight'
 import { ancestorDirectories, LANGUAGE_LABELS } from '@/lib/repo-utils'
 import type { FileTreeNode, Repository } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -40,6 +41,9 @@ export function CodeExplorer({ repo, file, lines }: CodeExplorerProps) {
   const selected = file && paths.includes(file) ? file : pickDefaultFile(paths)
   const { data: source, isLoading: fileLoading, error } = useFile(repo, selected)
   const highlight = parseLineRange(lines)
+  // A very large file (a generated bundle, a data file) is shown as plain text: same rows, line numbers and
+  // highlighted range, without building tens of thousands of syntax spans. Smaller files are unchanged.
+  const plainText = !!source && source.language !== 'text' && !shouldHighlight(source.content, source.lineCount)
 
   // Folders open because they hold the selected file, unless the user toggled them while that file was selected.
   // Derived during render (no effect), and a new selection starts from "open the ancestors" again.
@@ -179,10 +183,15 @@ export function CodeExplorer({ repo, file, lines }: CodeExplorerProps) {
           </div>
         ) : source ? (
           <>
+            {plainText && (
+              <p role="status" className="shrink-0 border-b border-border bg-muted/40 px-4 py-1.5 text-xs text-muted-foreground">
+                Large file: shown as plain text without syntax highlighting.
+              </p>
+            )}
             <CodeViewer
               key={source.path}
               content={source.content.replace(/\n$/, '')}
-              language={source.language}
+              language={plainText ? 'text' : source.language}
               highlight={highlight}
               className="min-h-0 flex-1"
             />

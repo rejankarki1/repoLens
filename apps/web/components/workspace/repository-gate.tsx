@@ -7,6 +7,7 @@ import { IndexingProgressBar } from '@/components/indexing-status'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { GitHubSignIn } from '@/components/auth/github-sign-in'
+import { SlowStartHint } from '@/components/slow-start-hint'
 import { describeIngestionError, startIngestion } from '@/lib/api/client'
 import { useRepository } from '@/lib/api/hooks'
 import { describeFailure, loadView } from '@/lib/api/request-state'
@@ -27,10 +28,11 @@ export function RepositoryGate({ id, children }: { id: string; children: (repo: 
 
   if (view.kind === 'loading') {
     return (
-      <div className="flex flex-col gap-4 p-6">
+      <div className="flex flex-col gap-4 p-6" aria-busy="true" aria-label="Loading repository">
         <Skeleton className="h-5 w-64" />
         <Skeleton className="h-24 w-full max-w-3xl" />
         <Skeleton className="h-24 w-full max-w-3xl" />
+        <SlowStartHint />
       </div>
     )
   }

@@ -5,6 +5,7 @@ import { ArrowRight } from 'lucide-react'
 import { DemoRepositoryCard } from '@/components/demo-repository-card'
 import { PageShell, SectionHeading } from '@/components/page-shell'
 import { RepositoryImportForm } from '@/components/repository-import-form'
+import { SlowStartHint } from '@/components/slow-start-hint'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useShowcaseRepositories } from '@/lib/api/hooks'
 
@@ -32,11 +33,14 @@ export function GuestDashboard() {
           </p>
         </div>
         {isLoading ? (
-          <ul className="grid gap-4 sm:grid-cols-2" aria-busy="true" aria-label="Loading demo repositories">
-            {Array.from({ length: 2 }, (_, i) => (
-              <Skeleton key={i} className="h-52 rounded-lg" />
-            ))}
-          </ul>
+          <>
+            <ul className="grid gap-4 sm:grid-cols-2" aria-busy="true" aria-label="Loading demo repositories">
+              {Array.from({ length: 2 }, (_, i) => (
+                <Skeleton key={i} className="h-52 rounded-lg" />
+              ))}
+            </ul>
+            <SlowStartHint />
+          </>
         ) : repositories.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground">
             This server has not published any demo repositories yet.

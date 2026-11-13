@@ -1,6 +1,7 @@
 'use client'
 
 import { DemoRepositoryCard } from '@/components/demo-repository-card'
+import { SlowStartHint } from '@/components/slow-start-hint'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useGuestAsk, useShowcaseRepositories } from '@/lib/api/hooks'
 
@@ -24,9 +25,10 @@ export function DemoRepositories() {
             : 'Both repositories are already indexed. Browse the code and the architecture, and read example questions with their cited sources. No account needed.'}
         </p>
       </div>
-      <ul className="grid gap-4 sm:grid-cols-2">
+      <ul className="grid gap-4 sm:grid-cols-2" aria-busy={isLoading || undefined}>
         {isLoading ? Array.from({ length: 2 }, (_, i) => <Skeleton key={i} className="h-52 rounded-lg" />) : data!.slice(0, 2).map((repo) => <DemoRepositoryCard key={repo.id} repo={repo} />)}
       </ul>
+      {isLoading && <SlowStartHint />}
     </section>
   )
 }
