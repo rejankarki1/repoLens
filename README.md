@@ -1,176 +1,218 @@
-# repoLens
+# RepoLens
 
-repoLens is an AI-powered repository intelligence tool for public GitHub repositories. It ingests a repository, makes its code searchable, lets you ask questions that are answered from the code with citations to the exact files and lines, and maps how the modules depend on each other.
+**Understand any public GitHub repository: browse its code, see how its components connect, and ask questions that are answered from the source itself, with citations to the exact files and lines.**
 
-> **Hosting:** Vercel (web app), Render (API and worker), Neon (PostgreSQL), Redis for the job queue. See [docs/deployment.md](docs/deployment.md) for the production steps and [docs/release-baseline.md](docs/release-baseline.md) for what was verified.
+**Live demo:** <https://repo-lens-bice.vercel.app> — two real repositories are open to visitors without an account.
 
-## What it does
+[![Backend CI](https://github.com/rejankarki1/repoLens/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/rejankarki1/repoLens/actions/workflows/backend-ci.yml)
+[![Frontend CI](https://github.com/rejankarki1/repoLens/actions/workflows/frontend-ci.yml/badge.svg)](https://github.com/rejankarki1/repoLens/actions/workflows/frontend-ci.yml)
+[![Browser smoke test](https://github.com/rejankarki1/repoLens/actions/workflows/e2e-smoke.yml/badge.svg)](https://github.com/rejankarki1/repoLens/actions/workflows/e2e-smoke.yml)
 
-- **Sign in with GitHub.** Identity only: no repository access is requested. Each user has a private workspace and private conversations; repository data (files, embeddings, architecture) is shared between users who analyze the same public repository.
-- **Guest demo.** The home page (`/`) is a public landing page; signed-in users go straight to their dashboard. Visitors can browse an explicit allow-list of pre-indexed repositories read-only (overview, source, architecture) and read curated example answers with their citations; they cannot import, re-analyze, delete, or search. They can ask a few live questions about the showcase repositories when the operator enables `GUEST_AI_ENABLED` (capped per visitor and for all guests, nothing saved). The example answers are real saved answers published with `apps/api/scripts/publish_showcase_answers.py` (see [docs/deployment.md](docs/deployment.md)), so visitors never use the AI budget.
-- **Ingestion.** Paste a public GitHub repository URL (signing in if needed, and your URL is kept through sign-in); a Redis/RQ worker downloads and indexes it in the background.
-- **Repository management.** The Repositories page searches your workspace and re-analyzes or removes repositories. Removing one deletes your membership and your conversations about it; the stored copy is deleted only if nobody else has added it and it is not in the showcase. Your GitHub repository is never touched.
-- **Code Explorer.** Browse the file tree and source, with a dependency panel for each file.
-- **Ask AI.** Questions are answered by Gemini or Groq from retrieved code only, with clickable citations that open a source preview. Conversations are saved and can be renamed, deleted, or cleared.
-- **Hybrid retrieval.** PostgreSQL full-text search plus pgvector similarity over tree-sitter code chunks, with Gemini embeddings (optional; keyword search works without a key).
-- **Architecture Explorer.** A deterministic, evidence-linked dependency graph of modules and files. It needs no AI key.
+## What RepoLens does
 
-## Technology
+Paste the URL of a public GitHub repository. A background worker downloads it, stores its files, splits the code into structure-aware chunks with tree-sitter, indexes them for keyword and semantic search, and maps the imports between files. You then get three views of the repository:
+
+- **Ask AI** answers questions from retrieved code only. Every answer carries `[S1]`-style citations that are validated against what was actually retrieved; clicking one opens the cited lines.
+- **Code Explorer** is a file tree and source viewer with line deep links and a per-file panel of what it imports and what imports it.
+- **Architecture Explorer** is an AI-identified diagram of the repository's functional components, in which every relationship is marked as verified by a real import or merely inferred.
+
+Sign-in is GitHub OAuth with no scopes (public profile only). Each user has a private workspace and private conversations; the stored copy of a public repository is shared by everyone who analyzes it.
+
+## Screenshots
+
+These are the screenshots used on the live landing page, taken from the current application on the Wanderlust demo repository.
+
+| Ask AI with cited sources | Architecture Explorer |
+| --- | --- |
+| ![Ask AI answering "Where is the entry point?" with numbered source tags and the cited lines of backend/server.js beside it](apps/web/public/landing/ask-ai-wanderlust.png) | ![The AI-identified architecture diagram: a frontend application, a backend API with its routes, database models and Cloudinary](apps/web/public/landing/architecture.png) |
+
+![The Code Explorer: a file tree, the listings controller with a highlighted range, and the file's imports and importers](apps/web/public/landing/code-explorer.png)
+
+## Core features
+
+- **Repository ingestion** from a GitHub URL, run by a Redis/RQ worker with progress shown in the UI, one retry for transient failures, heartbeats and stale-job recovery.
+- **Hybrid code retrieval**: PostgreSQL full-text search, exact symbol/file-name matching and pgvector similarity, fused with Reciprocal Rank Fusion and scoped to the repository's current commit. Works keyword-only when no embedding key is configured.
+- **Grounded answers with citations** streamed token by token. Citations are rebuilt from the retrieved chunks (path, lines, commit are never model output); markers that match nothing retrieved are removed.
+- **Repository-structure questions** ("where is the entry point?") get extra evidence: entry points detected in the code and declared by manifests, plus one hop of their imports.
+- **Deterministic architecture analysis** of imports (Python, JavaScript, TypeScript, TSX) with evidence for every edge, run automatically after ingestion. Its counts appear on the Overview tab and feed the per-file Dependencies panel.
+- **AI architecture diagram**, generated on request by a member, validated claim by claim against the deterministic graph, rendered with Mermaid with pan, zoom, minimap, focus highlighting and a details panel linking to real files.
+- **Saved conversations** with automatic titles, rename, delete and clear.
+- **GitHub sign-in**, server-side sessions, CSRF protection, per-user workspaces, and a read-only **guest showcase** of allow-listed repositories with curated example answers. Visitors can optionally ask a few live questions a day.
+- **Usage limits** enforced atomically in Redis: AI questions per user and globally, imports, embedding and diagram jobs, guest reads and sign-in attempts.
+
+## System architecture
+
+```mermaid
+flowchart LR
+  Browser["Browser<br/>Next.js app"]
+  Web["Vercel<br/>Next.js (static + /api rewrite)"]
+  API["FastAPI<br/>REST + SSE"]
+  Worker["RQ worker<br/>ingestion · embeddings · analysis · diagrams"]
+  PG[("PostgreSQL + pgvector<br/>files, chunks, embeddings,<br/>analyses, users, conversations")]
+  Redis[("Redis<br/>job queue, OAuth state,<br/>rate limits, quotas")]
+  GitHub["GitHub<br/>archives · OAuth"]
+  Gemini["Gemini<br/>embeddings · diagrams"]
+  Groq["Groq<br/>Ask AI answers"]
+
+  Browser --> Web --> API
+  API --> PG
+  API --> Redis
+  API -- enqueue --> Redis -- jobs --> Worker
+  Worker --> PG
+  Worker --> GitHub
+  API --> GitHub
+  Worker --> Gemini
+  API --> Gemini
+  API --> Groq
+```
+
+In production the browser only talks to the Vercel origin: `/api/*` is rewritten to the Render service, so the session cookie stays first-party and no CORS is involved. One Render container runs the API and the single worker under a small supervisor. Which provider writes Ask AI answers is a setting (`GENERATION_PROVIDER`: Gemini or Groq); the hosted demo uses Groq for answers and Gemini for embeddings and architecture diagrams.
+
+## Repository ingestion and indexing
+
+1. **Validate and queue.** `POST /repositories` checks the URL (GitHub only, `owner/name` rules, no credentials or ports) and creates the repository row, or adds you to the stored copy if someone already imported it. The web app then requests an ingestion (`POST /repositories/{id}/ingestions`), which is refused with 409 while one is already queued or running.
+2. **Download.** The worker resolves the default branch's commit and streams the zipball to a temporary file. Archives over `GITHUB_ARCHIVE_MAX_BYTES` (25 MiB by default, 10 MiB on the hosted demo) are rejected.
+3. **Read safely.** Entries are filtered as they are read: dependency directories, lockfiles, minified bundles, source maps, binaries, Git LFS pointers, files that look generated and files that look like credentials are skipped. At most 5,000 files, 1 MiB per file and 50 MiB in total are accepted; a repository that exceeds a limit is stored with an `ingestion_truncated` flag the UI shows.
+4. **Store the snapshot.** Files are written in one transaction, tagged with the commit SHA. A re-ingestion replaces the snapshot only on success; a failure keeps the previous one, which the UI keeps serving.
+5. **Chunk.** Python, JavaScript, TypeScript and TSX are parsed with tree-sitter into chunks of up to 1,500 bytes that follow the code's structure (functions, classes, methods) and record symbol names, line ranges and byte offsets. Other text files are chunked as plain text.
+6. **Index.** Every chunk gets a weighted `tsvector` (paths and symbols rank above code) for keyword search. If `GEMINI_API_KEY` is set, an embedding job is queued: `gemini-embedding-001` at 1,536 dimensions, stored by content hash so unchanged chunks are never re-embedded. Up to `EMBEDDING_MAX_CHUNKS_PER_REPOSITORY` chunks are embedded (10,000 by default, 3,000 on the hosted demo); the rest stay keyword-searchable.
+7. **Analyze.** A deterministic architecture analysis of the imports is queued; up to `ARCHITECTURE_MAX_FILES` (5,000) code files are analyzed.
+
+The repository status (`queued → in_progress → completed | failed`) lives in PostgreSQL and is polled by the UI while a job is active.
+
+## RAG retrieval and AI answer pipeline
+
+1. **Retrieve.** The question runs through the hybrid search (keyword, exact, semantic; 50 candidates per retriever; `score = Σ 1 / (60 + rank)`), scoped to the current commit. A missing key or a provider outage degrades to keyword results with a warning; one query embedding at most per question.
+2. **Discover structure** for questions that name no symbol: entry points found in the code (a listening server, a UI mount, a `main` guard) and declared by manifests (`package.json`, `pyproject`, `Procfile`, `Dockerfile`), mapped to their stored chunks so they are citable too.
+3. **Build a bounded prompt.** Up to 8 excerpts and 24,000 characters, labelled `S1`, `S2`…, with path and lines, plus the last 6 conversation messages. Excerpts are untrusted: they sit inside delimiters with a per-request random token and the system prompt forbids following instructions found in them.
+4. **Generate and stream.** The selected provider (Groq `llama-3.3-70b-versatile` or Gemini `gemini-3.5-flash` by default) answers over server-sent events (`retrieval`, `token`, `done` or `error`). Nothing is generated if retrieval finds nothing.
+5. **Validate citations.** `[S#]` markers that match no retrieved excerpt are removed; the citation list is rebuilt from the retrieved chunks; file names mentioned but not retrieved are returned as warnings.
+6. **Save** the question and answer together only after a complete answer. Provider errors, truncated output and abandoned streams save nothing and do not use the daily quota.
+
+The **AI architecture diagram** reuses the same provider classes with a one-shot prompt built from the deterministic analysis (modules, edges, entry points, manifests, representative excerpts). The model proposes components and relationships; the backend drops any source path not in the snapshot and recomputes every relationship's confidence from real import edges, so `verified` can never be asserted by the model.
+
+## Technology stack
 
 | Area | Technology |
 | --- | --- |
-| Web app | Next.js 16, React, Tailwind CSS, SWR, React Flow |
-| API | Python, FastAPI, SQLAlchemy (async), Alembic |
-| Background jobs | Redis, RQ |
-| Code parsing | tree-sitter (`tree-sitter-language-pack`) |
-| Database and vector search | PostgreSQL, pgvector |
-| AI providers | Gemini (embeddings and answers), Groq (answers, optional) |
-| Local services | Docker Compose |
+| Web app | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, SWR, Base UI/shadcn components, Mermaid |
+| API | Python 3.14, FastAPI, SQLAlchemy 2 (async, asyncpg), Alembic, httpx, Pydantic Settings |
+| Background jobs | Redis, RQ (one worker, retries scheduled by RQ) |
+| Code parsing | tree-sitter via `tree-sitter-language-pack` |
+| Database and vectors | PostgreSQL 17, pgvector (1,536-dimension vectors, cosine distance) |
+| AI providers | Google Gemini (`gemini-embedding-001` embeddings; answers and diagrams optional), Groq (answers) |
+| Authentication | GitHub OAuth (authorization code + PKCE, no scopes), server-side sessions |
+| Hosting (demo) | Vercel (web), Render (API + worker, Docker), Neon (PostgreSQL), hosted Redis |
+| Testing | pytest (real PostgreSQL and Redis), `node --test` unit tests, a headless-Chrome smoke test with a fake GitHub |
 
-## How it works
+## Local development setup
 
-1. **Ingestion** downloads the repository archive, stores its files, and splits code into chunks with tree-sitter.
-2. **Embeddings and indexing** store chunks for keyword search and, when `GEMINI_API_KEY` is set, vector search.
-3. **Ask AI** retrieves the most relevant chunks, asks the selected provider to answer using only those, and validates every citation against what was retrieved ([docs/rag.md](docs/rag.md)).
-4. **Architecture analysis** reads imports with tree-sitter and builds the dependency graph ([docs/architecture.md](docs/architecture.md)).
+You need Python 3.14, Node.js 22.18 or newer, and Docker. Run every command from the repository root unless noted.
 
-More detail: [docs/search.md](docs/search.md), [docs/erd.md](docs/erd.md).
+```bash
+# 1. Local settings and services (PostgreSQL with pgvector, Redis)
+cp .env.example .env
+docker compose up -d && docker compose ps
 
-## Repository structure
+# 2. API: virtual environment, dependencies, migrations, tree-sitter grammars (downloaded once)
+python3 -m venv apps/api/venv
+apps/api/venv/bin/python -m pip install -r apps/api/requirements-dev.txt
+apps/api/venv/bin/alembic upgrade head
+apps/api/venv/bin/python -c "from apps.api.services.code_parser import ensure_grammars; ensure_grammars()"
 
-```text
-repoLens/
-├── agent/               # Placeholder for future agent workflows (not implemented)
-├── apps/
-│   ├── api/             # FastAPI service, RQ worker, services and jobs
-│   └── web/             # Next.js app
-├── database/            # Alembic migrations
-├── docs/                # Project documentation
-├── infrastructure/      # Placeholder for deployment configuration
-├── ingestion/           # Placeholder directories; the ingestion code lives in apps/api/services and apps/api/jobs
-├── mcp/                 # Placeholder (not implemented)
-├── packages/            # Placeholder for shared code
-├── tests/               # Automated tests
-├── .env.example         # Local development settings template
-├── .github/workflows/   # Backend and frontend CI
-├── .gitignore           # Local files excluded from Git
-├── docker-compose.yml   # PostgreSQL with pgvector and Redis
-├── alembic.ini          # Migration configuration
-└── README.md
+# 3. Web app dependencies
+(cd apps/web && npm ci)
 ```
 
-Empty directories may contain `.gitkeep` files so Git can retain them. The placeholder directories contain nothing but `.gitkeep`.
-
-## Local setup
-
-Run these commands from the repository root. You need Python 3.14, Node.js 22.18 or newer, and Docker Desktop (or another running Docker daemon).
-
-1. Copy the local settings and start PostgreSQL and Redis:
-
-   ```bash
-   cp .env.example .env
-   docker compose up -d
-   docker compose ps
-   ```
-
-   The example password is only for local development. If you change `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or the exposed ports in `.env`, update `DATABASE_URL` or `REDIS_URL` in the same file to match. Do not commit `.env`. API keys (`GEMINI_API_KEY`, `GROQ_API_KEY`, `GITHUB_TOKEN`) are optional and belong only in `.env`.
-
-2. Create a GitHub OAuth App for sign-in (see [GitHub OAuth App setup](#github-oauth-app-setup)), copy `.env.oauth-check.example` to `.env.oauth-check`, `chmod 600` it, and put the client id and secret there (see [Start and stop](#start-and-stop)). Without them the app still starts and visitors can browse the showcase, but nobody can sign in or import.
-
-3. Install API dependencies, apply migrations, and fetch the tree-sitter grammars:
-
-   ```bash
-   python3 -m venv apps/api/venv
-   apps/api/venv/bin/python -m pip install -r apps/api/requirements-dev.txt
-   apps/api/venv/bin/alembic upgrade head
-   apps/api/venv/bin/python -c "from apps.api.services.code_parser import ensure_grammars; ensure_grammars()"
-   ```
-
-   The grammar download needs the network and is done once; the parser never downloads grammars while it runs. Without it, files are indexed as plain text and architecture analysis cannot read imports. Use `requirements.txt` instead of `requirements-dev.txt` if you do not need the test tools.
-
-   **Upgrading a database that predates sign-in?** Read [docs/auth-migration.md](docs/auth-migration.md) first: your old repositories and conversations are kept, and you take them over explicitly with `python -m apps.api.scripts.claim_local_data`.
-
-4. Install the web app's dependencies once: `cd apps/web && npm ci`.
-
-## Start and stop
-
-Run each service in its own terminal, from the repository root (the web app from `apps/web`):
+Start each process in its own terminal:
 
 ```bash
 docker compose up -d                                              # PostgreSQL + Redis
 apps/api/venv/bin/uvicorn apps.api.main:app --reload --port 8765  # FastAPI
 apps/api/venv/bin/python -m apps.api.worker                       # RQ worker
-cd apps/web && npm run dev                                        # Next.js
+cd apps/web && npm run dev                                        # Next.js on http://localhost:3000
 ```
 
-Open `http://localhost:3000` (use `localhost`, not `127.0.0.1`: the session cookie needs the web app and the API on the same site). `http://localhost:8765/docs` is the API documentation and `/health/ready` reports PostgreSQL and Redis. Stop a process with Ctrl-C; stop the containers with `docker compose stop` (never `docker compose down -v`, which deletes the data).
+Open `http://localhost:3000` (use `localhost`, not `127.0.0.1`: the session cookie needs the web app and the API on the same site). `http://localhost:8765/docs` is the API reference and `/health/ready` reports PostgreSQL and Redis.
 
-**Configuration: two files, read automatically.** The API, the worker and Alembic all read `apps/api/config.py`, which loads `.env` and then `.env.oauth-check` (the later file wins; a file that does not exist is skipped). Nothing needs to be exported or sourced.
+**Sign-in and AI are optional locally.** Without a GitHub OAuth App nobody can sign in or import, but a showcase repository you have imported another way is still browsable. Without `GEMINI_API_KEY`, search is keyword-only and no diagrams can be generated; without a Groq or Gemini key, Ask AI returns 503.
 
-| File | Holds | Git |
-| --- | --- | --- |
-| `.env` | the shared base: Docker ports, `GEMINI_API_KEY`, `GROQ_API_KEY`, `GENERATION_PROVIDER`, models, and the default (development) `DATABASE_URL` / `REDIS_URL` | ignored |
-| `.env.oauth-check` | only what differs for the isolated OAuth-check setup: `DATABASE_URL` (`repolens_oauth_check`), `REDIS_URL` (database 8), `INGESTION_QUEUE_NAME=oauth_check`, the GitHub OAuth App id and secret, and the `localhost` URLs | ignored (template: `.env.oauth-check.example`) |
-
-So while `.env.oauth-check` exists, every plain command uses the isolated database, Redis database 8 and the `oauth_check` queue, and the AI keys come from `.env`. To work against your real development resources, move `.env.oauth-check` aside. Put AI keys in `.env` only. A variable exported in your shell still beats both files, so if the wrong database or queue appears, check `env | grep -E 'DATABASE_URL|REDIS_URL|INGESTION|GEMINI|GROQ|GITHUB'` and `unset` the stray ones.
-
-Do not use the `oauth-check` overlay in production: set the real values through the production secret store (see `docs/security.md`).
-
-## Health check and troubleshooting
-
-```bash
-curl -s localhost:8765/health/ready     # {"status":"ready","checks":{"database":"ok","redis":"ok"}}
-docker compose ps                        # postgres and redis should be "running"
-```
+To enable sign-in, create a GitHub OAuth App (Settings → Developer settings → OAuth Apps) with homepage `http://localhost:3000` and callback `http://localhost:8765/auth/github/callback`, and put its id and secret in `.env` (or in `.env.oauth-check`, an optional overlay that also points the API at a separate database, Redis database and queue; see [docs/oauth-verification.md](docs/oauth-verification.md)). To let visitors browse without signing in, import repositories first and list them in `GUEST_SHOWCASE_REPOSITORIES`.
 
 | Symptom | Fix |
 | --- | --- |
-| `ConnectionRefusedError` on `127.0.0.1:5433` or `6379` | Docker is not running or the containers are stopped: start Docker Desktop, then `docker compose up -d`. If `docker` itself hangs, quit and reopen Docker Desktop. |
-| `port is already allocated` | Another service uses 5433, 6379, 8765 or 3000. Stop it, or change the port in `.env` (and `DATABASE_URL` / `REDIS_URL` with it). |
-| `No script_location` from Alembic | Run it from the repository root (`alembic.ini` has a relative path), as `apps/api/venv/bin/alembic upgrade head`. |
-| `password authentication failed` | `DATABASE_URL` does not match `POSTGRES_USER` / `POSTGRES_PASSWORD` in `.env`. A volume created with an older password keeps it; change `.env` back, or recreate the volume only if you accept losing local data. |
-| Jobs stay "queued" | The worker is not running, or it listens on another queue: `apps/api/venv/bin/python -m apps.api.worker`, and check `INGESTION_QUEUE_NAME` matches the API. |
-| Sign-in loops or the session is lost | Open the app at `http://localhost:3000`, not `127.0.0.1`. |
-| Indexing stuck at "embedding" | Use **Resume Indexing** in the chat panel. Gemini's free tier rate-limits embeddings; it continues where it stopped. |
+| `ConnectionRefusedError` on port 5433 or 6379 | Docker is not running: start it, then `docker compose up -d`. |
+| `No script_location` from Alembic | Run it from the repository root. |
+| Imports stay "queued" | The worker is not running, or listens on another `INGESTION_QUEUE_NAME`. |
+| Indexing stuck at "embedding" | Gemini's free tier rate-limits embeddings; use **Resume indexing** in the Ask AI panel. |
 
-## Tests
+## Environment variables
+
+All settings are read by `apps/api/config.py` from `.env` (and `.env.oauth-check` if present); shell variables override both. `.env.example` lists them with their defaults. The main ones:
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL`, `REDIS_URL` | PostgreSQL (asyncpg; a provider-style `postgresql://…?sslmode=require` URL is converted) and Redis |
+| `WEB_ORIGINS`, `WEB_BASE_URL`, `API_PUBLIC_URL` | CORS/CSRF allow-list, where the browser returns after sign-in, and the API's public URL (the OAuth callback is `<API_PUBLIC_URL>/auth/github/callback`) |
+| `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` | The GitHub OAuth App (secret: `.env` or the host's secret store only) |
+| `GITHUB_TOKEN` | Optional token for GitHub API calls (60 → 5,000 requests per hour) |
+| `GEMINI_API_KEY`, `EMBEDDING_MODEL`, `GEMINI_GENERATION_MODEL` | Embeddings (required for semantic search) and Gemini answers |
+| `GENERATION_PROVIDER`, `GROQ_API_KEY`, `GROQ_GENERATION_MODEL` | `gemini` (default) or `groq` for Ask AI answers; no automatic fallback |
+| `ARCHITECTURE_DIAGRAM_GENERATION_PROVIDER` | Provider for diagram generation only (the demo uses `gemini` because a diagram prompt exceeds the Groq model's request limit) |
+| `GUEST_SHOWCASE_REPOSITORIES` | `owner/name` list visitors may browse read-only; nothing is public unless listed |
+| `GUEST_AI_ENABLED`, `GUEST_AI_*` | Optional live questions for visitors, capped per visitor and for all visitors |
+| `AI_*`, `IMPORT_*`, `EMBEDDING_*`, `ARCHITECTURE_*`, `MAX_*` | Usage limits and size caps (defaults in `.env.example` and `apps/api/config.py`) |
+| `ENVIRONMENT=production` | Secure `__Host-` cookies, HSTS and CSP, API docs off, and a start-up check that refuses unsafe settings |
+| `NEXT_PUBLIC_API_URL`, `API_ORIGIN` (web app) | Where the browser finds the API (`/api` in production, proxied to `API_ORIGIN`); build-time values, never secrets |
+
+Never commit `.env` or put a secret in a `NEXT_PUBLIC_*` variable. [docs/deployment.md](docs/deployment.md) has the production checklist.
+
+## Testing
 
 ```bash
-apps/api/venv/bin/python -m pytest -q           # backend; needs PostgreSQL with pgvector, creates a disposable repolens_test database
+apps/api/venv/bin/python -m pytest -q                 # backend: needs local PostgreSQL + Redis; uses its own repolens_test database and Redis db 15
 cd apps/web && npm test && npm run typecheck && npm run lint && npm run build
+python -m tests.e2e.run_smoke                        # browser smoke test: boots an isolated stack with a fake GitHub (needs Chrome)
 ```
 
-**Test isolation.** The tests can never reach your development data: before anything reads the settings, `tests/conftest.py` points `DATABASE_URL` at `repolens_test`, `REDIS_URL` at database 15 with its own queue name, and blanks the Gemini, Groq and GitHub secrets, so every reader of the settings (including job entry points and Alembic) lands in disposable resources. The suite refuses to start if the database or Redis host is not local (override with `REPOLENS_TEST_ALLOW_REMOTE=1` for a disposable CI service), if Redis database 15 holds data it did not create, or if `repolens_test` holds application data. The smoke test applies the same ownership rules to its database (`repolens_e2e`) and Redis database 9.
+The backend suite never reaches development data: before the settings are read, `tests/conftest.py` points them at a disposable database, Redis database and queue, blanks every provider key, and refuses to run against a non-local host or a database it did not create. The smoke test does the same with its own database (`repolens_e2e`), Redis database 9 and ports, and drives headless Chrome through sign-in, the guest showcase, the paste-URL import flow, isolation between users and repository removal. All three run in GitHub Actions on every push and pull request to `main`, with throwaway services and no AI, OAuth or GitHub credentials.
 
-A browser smoke test (headless Chrome, a fake GitHub, its own database, Redis database and ports) covers sign-in, the guest showcase, the paste-URL flow and isolation between users:
+## Limitations and future improvements
 
-```bash
-python -m tests.e2e.run_smoke      # needs Chrome (or CHROME_BIN) and the web app's dependencies; never touches development data
+- **Public repositories only**, and size-limited: archives over 25 MiB (10 MiB on the hosted demo), files over 1 MiB, and anything beyond 5,000 files or 50 MiB per repository are skipped, so very large monorepos are stored partially and flagged as truncated.
+- **Structure-aware parsing covers Python, JavaScript, TypeScript and TSX.** Other languages are indexed as plain text and do not appear in the import graph or the architecture diagram.
+- **Semantic search is capped** at 10,000 embedded chunks per repository (3,000 on the demo); the remainder is keyword-only. There is no approximate-nearest-neighbour index yet, which is fine at this scale.
+- **Answers are only as good as retrieval.** The model sees at most 8 excerpts, so broad questions about a large repository can miss relevant code; the citations make this visible rather than hidden.
+- **The AI diagram is model output**, bounded by the deterministic analysis it reads and non-deterministic between runs; relationships other than imports are always marked inferred.
+- **No answer caching**: every question is a live retrieval and generation. Repeated questions cost a provider call each time (within the per-user and global quotas).
+- **The hosted demo runs on free tiers.** The API sleeps after idle and takes up to a minute to wake, so the first request of a visit is slow; the worker sleeps with it, so queued imports wait for the next visit. Quotas are deliberately low.
+- **Per-IP limits behind the hosting proxies act as one shared bucket** (proxy addresses are not trusted by default), which can only over-limit, never under-limit.
+- Possible next steps: more tree-sitter grammars, an HNSW index once repositories grow, account deletion and data export, and garbage collection of embeddings whose repositories were removed.
+
+## Repository layout
+
+```text
+apps/api/        FastAPI service, RQ worker, jobs, services (ingestion, search, RAG, architecture), scripts
+apps/web/        Next.js app (app/, components/, lib/) and its unit tests
+database/        Alembic migrations
+docs/            Design and operations documentation (below)
+tests/           Backend tests and the browser smoke test (tests/e2e)
+.github/         CI workflows
+docker-compose.yml, Dockerfile, render.yaml, alembic.ini, .env.example
 ```
 
-The same checks run in GitHub Actions on every push and pull request to `main` (`.github/workflows/`). They use throwaway services and no AI, OAuth or GitHub credentials.
+`agent/`, `ingestion/`, `mcp/`, `packages/` and `infrastructure/` are placeholder directories from the initial project layout and contain only `.gitkeep` files.
 
-## GitHub OAuth App setup
+## Documentation
 
-RepoLens signs users in with a GitHub OAuth App. It asks for no scopes, so the token can read only public profile data (id, username, name, avatar); it is used once, revoked, and never stored.
-
-1. GitHub → Settings → Developer settings → OAuth Apps → **New OAuth App**.
-2. **Homepage URL**: your web app (`http://localhost:3000` locally).
-3. **Authorization callback URL**: the API's callback, exactly `<API_PUBLIC_URL>/auth/github/callback` (`http://localhost:8765/auth/github/callback` locally). GitHub only returns the browser to this URL.
-4. Create the app, then **Generate a new client secret**.
-5. Put the values in `.env.oauth-check` locally (the app reads it after `.env`), or in the production secret store when deployed. Never commit them, and never put them in `apps/web`: `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `API_PUBLIC_URL`, `WEB_BASE_URL`, `WEB_ORIGINS`. Use a separate OAuth App for production, with the production URLs.
-6. Restart the API. `GET /auth/me` now reports `github_login_enabled: true` and "Sign in with GitHub" works.
-
-To let visitors browse some repositories without signing in, import them first, then list them in `GUEST_SHOWCASE_REPOSITORIES` (`owner/name`, comma separated). Nothing is public unless it is listed.
-
-## Who can do what
-
-| | Visitor (guest) | Signed in |
-| --- | --- | --- |
-| Showcase repositories: overview, source, architecture | read-only | read-only until added to your repositories |
-| Your own repositories | none | full use |
-| Paste a URL and analyze a public repository | asked to sign in; the URL is kept | yes (per-hour and concurrent import limits) |
-| Ask AI, conversations, search, re-analysis | no | yes, on repositories in your workspace (per-day, burst and shared-budget limits) |
-| Someone else's conversations or repositories | no | no |
-
-Limits are settings (`AI_*`, `IMPORT_*`, `GUEST_*`, `AUTH_*` in `.env.example`) enforced server-side in Redis. See [docs/auth-design.md](docs/auth-design.md) and [docs/security.md](docs/security.md).
+| Document | Covers |
+| --- | --- |
+| [docs/deployment.md](docs/deployment.md) | Hosting on Vercel + Render + Neon + Redis, free-tier guards, publishing the showcase, update order |
+| [docs/rag.md](docs/rag.md) | Conversations, retrieval, prompt building, citation validation, providers |
+| [docs/search.md](docs/search.md) | Keyword, exact and semantic search; embeddings, jobs and rate limits |
+| [docs/architecture.md](docs/architecture.md) | The deterministic import graph: endpoints, graph model, evidence |
+| [docs/architecture-diagram.md](docs/architecture-diagram.md) | The AI diagram: context selection, validation rule, storage, limits |
+| [docs/auth-design.md](docs/auth-design.md), [docs/security.md](docs/security.md) | Sign-in flow, sessions, CSRF, authorization, usage limits, operator duties |
+| [docs/auth-migration.md](docs/auth-migration.md), [docs/oauth-verification.md](docs/oauth-verification.md) | Upgrading a pre-auth database; checking a real OAuth App in isolation |
+| [docs/release-baseline.md](docs/release-baseline.md), [docs/verification-m1.md](docs/verification-m1.md), [docs/ux-audit.md](docs/ux-audit.md) | What was verified, and when |
+| [docs/erd.md](docs/erd.md) | Historical schema design; the migrations and `apps/api/models/entities.py` are the source of truth |

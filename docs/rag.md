@@ -1,6 +1,6 @@
 # Repository questions (RAG)
 
-Ask a natural-language question about an imported repository and get a Gemini answer grounded in its source, with citations to real files and line ranges.
+Ask a natural-language question about an imported repository and get an answer from Gemini or Groq (see "Choosing the answer provider") grounded in its source, with citations to real files and line ranges.
 
 ## Request flow
 
