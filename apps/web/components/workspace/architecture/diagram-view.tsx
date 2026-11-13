@@ -13,6 +13,7 @@ import { requestArchitectureDiagram, type DiagramStatus } from '@/lib/api/archit
 import { useArchitectureDiagram, useArchitectureDiagramStatus } from '@/lib/api/hooks'
 import { fileLink, shortSha } from '@/lib/architecture/model'
 import { DIAGRAM_CLICK_CALLBACK, diagramToMermaid, legendEntries } from '@/lib/architecture-diagram/mermaid'
+import { diagramView } from '@/lib/architecture-diagram/view-state'
 import type { ArchitectureDiagram, DiagramComponent } from '@/lib/architecture-diagram/types'
 import {
   adaptiveMinScale, centeredTransform, clampedFitScale, connectedToNode, fitScaleFor, minimapPointToTransform, panBy, svgSize,
@@ -60,18 +61,35 @@ export function ArchitectureDiagramView({ repo }: { repo: Repository }) {
     [repo.id, refreshStatus],
   )
 
-  if (statusQuery.isLoading) return <DiagramSkeleton />
-  if (statusQuery.error || !statusQuery.data) {
-    return <CenteredMessage icon={<TriangleAlert className="size-5 text-warning" aria-hidden="true" />} message={messageOf(statusQuery.error)} />
-  }
-  const status = statusQuery.data
-  const diagram = diagramQuery.data?.diagram
+  // One decision for the whole tab (see `diagramView`): cached data outlives a failed poll, and "a diagram
+  // exists but has not arrived yet" is loading, never "no diagram yet".
+  const view = diagramView(statusQuery, diagramQuery)
 
-  if (diagram) {
+  if (view.kind === 'loading') return <DiagramSkeleton />
+  if (view.kind === 'status-error' || view.kind === 'diagram-error') {
+    const retry = view.kind === 'status-error' ? statusQuery : diagramQuery
+    return (
+      <CenteredMessage
+        icon={<TriangleAlert className="size-5 text-warning" aria-hidden="true" />}
+        message={view.message}
+        action={
+          view.retryable ? (
+            <Button size="sm" variant="outline" onClick={() => void retry.mutate()} disabled={retry.isValidating}>
+              <RefreshCw className={cn(retry.isValidating && 'animate-spin')} aria-hidden="true" />
+              Try again
+            </Button>
+          ) : undefined
+        }
+      />
+    )
+  }
+  const status = view.status
+
+  if (view.kind === 'diagram') {
     return (
       <DiagramCanvas
         repo={repo}
-        diagram={diagram}
+        diagram={view.diagram}
         status={status}
         requestError={requestError}
         onRegenerate={canGenerate ? () => void request(status.freshness === 'current') : undefined}
@@ -79,8 +97,8 @@ export function ArchitectureDiagramView({ repo }: { repo: Repository }) {
       />
     )
   }
-  if (status.status === 'queued' || status.status === 'running') return <DiagramPendingState status={status} />
-  if (status.status === 'failed') {
+  if (view.kind === 'pending') return <DiagramPendingState status={status} />
+  if (view.kind === 'failed') {
     return (
       <GenerateState
         title="Diagram generation failed"
@@ -117,12 +135,13 @@ function DiagramSkeleton() {
   )
 }
 
-function CenteredMessage({ message, detail, icon }: { message: string; detail?: string; icon?: React.ReactNode }) {
+function CenteredMessage({ message, detail, icon, action }: { message: string; detail?: string; icon?: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
       {icon}
       <p>{message}</p>
       {detail && <p className="max-w-md text-xs">{detail}</p>}
+      {action && <div className="mt-1">{action}</div>}
     </div>
   )
 }
@@ -739,6 +758,14 @@ function DiagramCanvas({
                 visibility: fitted ? 'visible' : 'hidden', // no jump: shown only once placed
               }}
             />
+          )}
+          {!renderError && !fitted && (
+            // Mermaid is loaded on demand and lays out two orientations before one is placed: on a large
+            // diagram that is a visible pause, so say so instead of showing an empty canvas.
+            <div role="status" className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-5 animate-spin text-primary" aria-hidden="true" />
+              Rendering the diagram…
+            </div>
           )}
           {selected && (
             <p className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md border border-border bg-card/90 px-2.5 py-1 text-[11px] text-muted-foreground backdrop-blur">

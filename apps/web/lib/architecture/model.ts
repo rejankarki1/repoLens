@@ -2,7 +2,9 @@
  * View-model helpers for the architecture explorer. Pure functions over the Phase 7A API types; nothing here
  * creates data the backend did not return (every path, line range and edge shown comes from the response).
  */
-import type { AnalysisStatus, Evidence, Graph, GraphEdge, GraphNode, NodeDetail } from '@/lib/api/architecture'
+import type { AnalysisStatus, ArchitectureResponse, Evidence, Graph, GraphEdge, GraphNode, NodeDetail } from '@/lib/api/architecture'
+// A relative `.ts` import (not the `@/` alias) so Node's test runner can load this module without a bundler.
+import { loadView, type QueryState } from '../api/request-state.ts'
 
 export const STATUS_POLL_MS = 2_000
 
@@ -24,6 +26,42 @@ export function shouldAutoRequest(status: AnalysisStatus): boolean {
 export const autoRequestKey = (status: AnalysisStatus) => `${status.repository_id}:${status.current_commit_sha}`
 
 export const shortSha = (sha: string | null | undefined) => (sha ? sha.slice(0, 7) : '')
+
+/* ------------------------------ Overview summary ------------------------------ */
+
+export type SummaryView =
+  /** The status is loading, or the status says a result exists and the graph is still being fetched. */
+  | { kind: 'loading' }
+  /** No status is cached and the request failed. */
+  | { kind: 'unavailable' }
+  /** The stored graph's numbers. `status` is the latest known status (it may be stale if its refetch failed). */
+  | { kind: 'result'; status: AnalysisStatus; graph: Graph }
+  /** The status promises a result but the graph request failed, with nothing cached. */
+  | { kind: 'graph-unavailable'; status: AnalysisStatus }
+  | { kind: 'running'; status: AnalysisStatus }
+  | { kind: 'failed'; status: AnalysisStatus }
+  | { kind: 'none'; status: AnalysisStatus }
+
+/**
+ * What the Overview tab's architecture card shows. Cached data outlives a failed poll; "there is a result"
+ * plus "the graph has not arrived yet" is loading, never "not analyzed yet".
+ */
+export function summaryView(statusQuery: QueryState<AnalysisStatus>, graphQuery: QueryState<ArchitectureResponse | null>): SummaryView {
+  const status = loadView(statusQuery)
+  if (status.kind === 'loading') return { kind: 'loading' }
+  if (status.kind === 'error') return { kind: 'unavailable' }
+  const s = status.data
+  const graph = graphQuery.data?.graph
+  if (graph) return { kind: 'result', status: s, graph }
+  if (s.has_result) {
+    const result = loadView(graphQuery)
+    if (result.kind === 'loading') return { kind: 'loading' }
+    if (result.kind === 'error') return { kind: 'graph-unavailable', status: s }
+  }
+  if (isActive(s)) return { kind: 'running', status: s }
+  if (s.status === 'failed') return { kind: 'failed', status: s }
+  return { kind: 'none', status: s }
+}
 
 /* --------------------------------- Evidence --------------------------------- */
 

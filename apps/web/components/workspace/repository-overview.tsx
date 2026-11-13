@@ -5,7 +5,7 @@ import { ArrowRight, Code2, FileCode2, FolderTree, Loader2, MessageSquareText, N
 import { languageColor } from '@/components/language-dot'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useArchitectureGraph, useArchitectureStatus, useConversations, useRepositoryStats } from '@/lib/api/hooks'
-import { count, shortSha } from '@/lib/architecture/model'
+import { count, shortSha, summaryView } from '@/lib/architecture/model'
 import { formatNumber, formatRelativeTime } from '@/lib/repo-utils'
 import type { Repository } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -113,12 +113,14 @@ export function RepositoryOverview({ repo }: { repo: Repository }) {
   )
 }
 
-/** The architecture analysis at a glance; it only reads an existing result and never starts an analysis. */
+/**
+ * The architecture analysis at a glance; it only reads an existing result and never starts an analysis (the
+ * analysis itself is queued by the ingestion job, so a re-analysis of the repository refreshes it).
+ */
 function ArchitectureSummary({ repo }: { repo: Repository }) {
   const status = useArchitectureStatus(repo)
   const graph = useArchitectureGraph(repo, status.data)
-  const s = status.data
-  const result = graph.data?.graph
+  const view = summaryView(status, graph)
   const open = (
     <Link href={`/repos/${repo.id}/graph`} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
       Open the AI-identified diagram <ArrowRight className="size-3.5" aria-hidden="true" />
@@ -131,27 +133,32 @@ function ArchitectureSummary({ repo }: { repo: Repository }) {
         <h2 className="text-sm font-medium">Architecture</h2>
         <p className="text-xs text-muted-foreground">These counts come from parsing the code&rsquo;s own imports. The diagram groups them into components.</p>
       </div>
-      {status.isLoading ? (
+      {view.kind === 'loading' ? (
         <Skeleton className="h-16" />
-      ) : status.error || !s ? (
+      ) : view.kind === 'unavailable' ? (
         <p className="text-sm text-muted-foreground">The analysis status could not be loaded.</p>
-      ) : result ? (
+      ) : view.kind === 'graph-unavailable' ? (
         <>
-          {s.freshness === 'stale' && (
+          <p className="text-sm text-muted-foreground">The analysis result could not be loaded right now.</p>
+          {open}
+        </>
+      ) : view.kind === 'result' ? (
+        <>
+          {view.status.freshness === 'stale' && (
             <p className="flex items-start gap-1.5 text-xs text-warning">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-              From commit {shortSha(s.analyzed_commit_sha)}; the repository is now at {shortSha(s.current_commit_sha)}.
-              {s.status === 'queued' || s.status === 'running' ? ' An update is running.' : ' Open the map to refresh it.'}
+              From commit {shortSha(view.status.analyzed_commit_sha)}; the repository is now at {shortSha(view.status.current_commit_sha)}.
+              {view.status.status === 'queued' || view.status.status === 'running' ? ' An update is running.' : ' Re-analyze the repository to update it.'}
             </p>
           )}
           <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-5">
             {(
               [
-                { label: 'Modules', value: result.stats.modules },
-                { label: 'Dependencies', value: result.stats.file_edges },
-                { label: 'Packages', value: result.stats.external_packages },
-                { label: 'Circular imports', value: result.stats.cycles, tone: 'text-destructive' },
-                { label: 'Unresolved imports', value: result.stats.unresolved_imports, tone: 'text-warning' },
+                { label: 'Modules', value: view.graph.stats.modules },
+                { label: 'Dependencies', value: view.graph.stats.file_edges },
+                { label: 'Packages', value: view.graph.stats.external_packages },
+                { label: 'Circular imports', value: view.graph.stats.cycles, tone: 'text-destructive' },
+                { label: 'Unresolved imports', value: view.graph.stats.unresolved_imports, tone: 'text-warning' },
               ] as { label: string; value: number; tone?: string }[]
             ).map(({ label, value, tone }) => (
               <div key={label}>
@@ -160,35 +167,35 @@ function ArchitectureSummary({ repo }: { repo: Repository }) {
               </div>
             ))}
           </dl>
-          {result.technologies.length > 0 && (
+          {view.graph.technologies.length > 0 && (
             <ul className="flex flex-wrap gap-1.5" aria-label="Technologies">
-              {result.technologies.map((t) => (
+              {view.graph.technologies.map((t) => (
                 <li key={t.id} className="rounded-full border border-border bg-card px-2.5 py-0.5 text-xs" title={t.category}>
                   {t.name}
                 </li>
               ))}
             </ul>
           )}
-          {result.areas.length > 0 && (
+          {view.graph.areas.length > 0 && (
             <p className="text-xs text-muted-foreground">
-              Detected from the code: {result.areas.map((a) => a.label.toLowerCase()).join(', ')}.
+              Detected from the code: {view.graph.areas.map((a) => a.label.toLowerCase()).join(', ')}.
             </p>
           )}
           {open}
         </>
-      ) : s.status === 'queued' || s.status === 'running' ? (
+      ) : view.kind === 'running' ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
           <Loader2 className="size-4 animate-spin" aria-hidden="true" />
           The architecture is being analyzed. This takes a few seconds.
         </p>
-      ) : s.status === 'failed' ? (
+      ) : view.kind === 'failed' ? (
         <>
-          <p className="text-sm text-destructive">The last analysis failed{s.error ? `: ${s.error}` : '.'}</p>
+          <p className="text-sm text-destructive">The last analysis failed{view.status.error ? `: ${view.status.error}` : '.'}</p>
           {open}
         </>
       ) : (
         <>
-          <p className="text-sm text-muted-foreground">Not analyzed yet. Opening the map starts the analysis.</p>
+          <p className="text-sm text-muted-foreground">Not analyzed yet. The analysis runs after ingestion; re-analyze the repository to start it.</p>
           {open}
         </>
       )}

@@ -2,23 +2,30 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { AlertCircle, Clock, FolderX, Loader2 } from 'lucide-react'
+import { AlertCircle, Clock, FolderX, Loader2, RefreshCw, WifiOff } from 'lucide-react'
 import { IndexingProgressBar } from '@/components/indexing-status'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { GitHubSignIn } from '@/components/auth/github-sign-in'
-import { ApiError, describeIngestionError, startIngestion } from '@/lib/api/client'
+import { describeIngestionError, startIngestion } from '@/lib/api/client'
 import { useRepository } from '@/lib/api/hooks'
+import { describeFailure, loadView } from '@/lib/api/request-state'
 import type { Repository } from '@/lib/types'
 
 /**
- * Renders children only once the repository is fully indexed, and shows
- * loading, progress, failure, and not-found states otherwise.
+ * Renders children only once the repository is fully indexed, and shows loading, progress, failure, and
+ * not-found states otherwise.
+ *
+ * The repository is polled while it is being ingested, and SWR revalidates it on focus and reconnect. A
+ * poll that fails for a transient reason (the API unreachable, a 5xx while the server restarts) must not
+ * unmount the children: the cached repository is still the right thing to show, and the Ask AI tab may be
+ * streaming an answer. Only a permanent answer (404: removed; 401: signed out) replaces the workspace.
  */
 export function RepositoryGate({ id, children }: { id: string; children: (repo: Repository) => React.ReactNode }) {
-  const { data: repo, error, isLoading } = useRepository(id)
+  const { data, error, isLoading, isValidating, mutate } = useRepository(id)
+  const view = loadView({ data, error, isLoading })
 
-  if (isLoading) {
+  if (view.kind === 'loading') {
     return (
       <div className="flex flex-col gap-4 p-6">
         <Skeleton className="h-5 w-64" />
@@ -28,27 +35,42 @@ export function RepositoryGate({ id, children }: { id: string; children: (repo: 
     )
   }
 
-  if (error instanceof ApiError && error.status === 401) {
-    return (
-      <StateMessage icon={<FolderX className="size-5 text-muted-foreground" aria-hidden="true" />} title="Sign in to view this repository">
-        This repository is not part of the public showcase. Sign in with GitHub to open your own repositories.
-        <div className="mt-2">
-          <GitHubSignIn next={typeof window === 'undefined' ? '/repositories' : window.location.pathname + window.location.search} />
-        </div>
-      </StateMessage>
-    )
-  }
-
-  if (error || !repo) {
+  if (view.kind === 'error') {
+    if (view.failure === 'unauthorized') {
+      return (
+        <StateMessage icon={<FolderX className="size-5 text-muted-foreground" aria-hidden="true" />} title="Sign in to view this repository">
+          This repository is not part of the public showcase. Sign in with GitHub to open your own repositories.
+          <div className="mt-2">
+            <GitHubSignIn next={typeof window === 'undefined' ? '/repositories' : window.location.pathname + window.location.search} />
+          </div>
+        </StateMessage>
+      )
+    }
+    if (view.transient) {
+      // Nothing cached and the API is unreachable or failing: a retry is the right action, not "not found".
+      return (
+        <StateMessage icon={<WifiOff className="size-5 text-muted-foreground" aria-hidden="true" />} title="Could not load this repository">
+          {describeFailure(view.error)}
+          <Button size="sm" variant="outline" className="mt-2" onClick={() => void mutate()} disabled={isValidating}>
+            <RefreshCw className={isValidating ? 'animate-spin' : undefined} aria-hidden="true" />
+            Try again
+          </Button>
+        </StateMessage>
+      )
+    }
     return (
       <StateMessage icon={<FolderX className="size-5 text-muted-foreground" aria-hidden="true" />} title="Repository not found">
-        This repository is not in your workspace, or the RepoLens API could not be reached.
+        {view.failure === 'not_found' || view.failure === 'forbidden'
+          ? 'This repository is not in your workspace, or it has been removed.'
+          : describeFailure(view.error, 'This repository could not be loaded.')}
         <Button size="sm" variant="outline" className="mt-2" render={<Link href="/dashboard" />} nativeButton={false}>
           Back to dashboard
         </Button>
       </StateMessage>
     )
   }
+
+  const repo = view.data
 
   // A re-ingestion is running or failed, but a previous snapshot is stored and still served by the
   // backend: keep the workspace usable and explain the state in a banner.
