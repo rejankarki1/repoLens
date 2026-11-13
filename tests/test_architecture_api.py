@@ -1,6 +1,5 @@
 """Architecture analysis end to end against the test database: queueing, running, reading, staleness and isolation."""
 
-import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -16,7 +15,7 @@ import apps.api.jobs.ingestion_job as ingestion_job
 from apps.api.config import get_settings
 from apps.api.core.queue import ARCHITECTURE_JOB_FUNC, enqueue_architecture, get_queue
 from apps.api.main import app
-from apps.api.models.entities import ArchitectureAnalysis, Repository, SourceFile
+from apps.api.models.entities import ArchitectureAnalysis, SourceFile
 from apps.api.services.architecture import store
 from tests.search_support import SHA_A, SHA_B, ingest, new_repository
 

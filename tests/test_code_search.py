@@ -33,7 +33,6 @@ from tests.search_support import (
     FakeEmbedder,
     ingest,
     new_repository,
-    snapshot,
 )
 
 pytestmark = pytest.mark.anyio

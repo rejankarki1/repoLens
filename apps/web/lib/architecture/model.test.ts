@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import type { AnalysisStatus, Evidence, Graph, GraphEdge, GraphNode, NodeDetail } from '../api/architecture.ts'
 import {
   autoRequestKey, codeLink, isImportEvidence, kindInfo, moduleDetailGraph, moduleRelations, neighbourhood, overviewGraph,
-  shouldAutoRequest,
+  shouldAutoRequest, summaryView,
 } from './model.ts'
 
 const status = (over: Partial<AnalysisStatus>): AnalysisStatus => ({
@@ -199,4 +199,40 @@ test('only the languages the analysis reads are looked up', async () => {
   const { isAnalyzedPath } = await import('./model.ts')
   for (const yes of ['a.py', 'a.pyi', 'src/x.ts', 'x.tsx', 'a.js', 'a.jsx', 'a.mjs', 'a.cjs', 'a.mts', 'a.cts', 'a.d.ts']) assert.equal(isAnalyzedPath(yes), true, yes)
   for (const no of ['README.md', 'package.json', 'a.css', 'Makefile', 'a.pyc', 'x.json', 'a.tsx.map']) assert.equal(isAnalyzedPath(no), false, no)
+})
+
+/* ------------------------------ Overview summary ------------------------------ */
+
+const apiError = (code: number): Error => Object.assign(new Error(`Request failed (${code})`), { status: code })
+const stored = status({ status: 'completed', freshness: 'current', has_result: true, analyzed_commit_sha: 'a'.repeat(40), analyzed_at: '2026-01-01T00:00:00Z' })
+const idle = { data: undefined, error: undefined, isLoading: false }
+const loading = { data: undefined, error: undefined, isLoading: true }
+const response = { analysis: stored, graph: graph({}) }
+
+test('summary: the status says a result exists but the graph is still loading: loading, not "not analyzed yet"', () => {
+  assert.deepEqual(summaryView(loading, idle), { kind: 'loading' })
+  assert.deepEqual(summaryView({ data: stored, error: undefined, isLoading: false }, loading), { kind: 'loading' })
+})
+
+test('summary: a stored result shows its graph', () => {
+  const view = summaryView({ data: stored, error: undefined, isLoading: false }, { data: response, error: undefined, isLoading: false })
+  assert.equal(view.kind, 'result')
+})
+
+test('summary: a failed status poll keeps the cached result instead of "could not be loaded"', () => {
+  const view = summaryView({ data: stored, error: apiError(502), isLoading: false }, { data: response, error: undefined, isLoading: false })
+  assert.equal(view.kind, 'result')
+})
+
+test('summary: a failed first status request is unavailable; a failed graph request with a stored result says so', () => {
+  assert.deepEqual(summaryView({ data: undefined, error: apiError(0), isLoading: false }, idle), { kind: 'unavailable' })
+  const view = summaryView({ data: stored, error: undefined, isLoading: false }, { data: undefined, error: apiError(500), isLoading: false })
+  assert.equal(view.kind, 'graph-unavailable')
+})
+
+test('summary: running, failed and none follow the status when no graph is stored', () => {
+  assert.equal(summaryView({ data: status({ status: 'running' }), error: undefined, isLoading: false }, idle).kind, 'running')
+  assert.equal(summaryView({ data: status({ status: 'queued' }), error: undefined, isLoading: false }, idle).kind, 'running')
+  assert.equal(summaryView({ data: status({ status: 'failed', error: 'x' }), error: undefined, isLoading: false }, idle).kind, 'failed')
+  assert.equal(summaryView({ data: status({}), error: undefined, isLoading: false }, idle).kind, 'none')
 })

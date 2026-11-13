@@ -8,6 +8,7 @@ import { isActive as analysisActive, STATUS_POLL_MS } from '@/lib/architecture/m
 import { getFile, getFileSummaries, getRepository, listRepositories, listShowcaseRepositories, toFileTree } from './client'
 import { getArchitecture, getArchitectureNode, getArchitectureStatus, type AnalysisStatus } from './architecture'
 import { getArchitectureDiagram, getArchitectureDiagramStatus, type DiagramStatus } from './architecture-diagram'
+import { diagramResultKey, IMMUTABLE_SWR_OPTIONS, readyKey, resultKey } from './cache-policy'
 import { getSearchIndex, listConversations } from './chat'
 import { getGuestAsk } from './guest-ask'
 import { getShowcaseAnswers } from './showcase'
@@ -34,19 +35,17 @@ export function useRepository(id: string) {
   })
 }
 
-/**
- * Repository-scoped resources are fetched whenever a stored snapshot exists (`indexedCommit`), even
- * while a re-ingestion is running or after one failed: the backend keeps serving the last good
- * snapshot. The key includes `lastAnalyzedAt`, which changes on every successful ingestion, so a
- * finished re-ingestion automatically refetches the file list and any open file.
+/*
+ * Repository-scoped resources are fetched whenever a stored snapshot exists (`indexedCommit`), even while a
+ * re-ingestion is running or after one failed: the backend keeps serving the last good snapshot. Their keys
+ * (`readyKey`, `resultKey`, `diagramResultKey` in `cache-policy.ts`) name the exact version, so a finished
+ * re-ingestion or a new analysis refetches them by changing the key, and the entries themselves are never
+ * revalidated on focus or for being "stale" (`IMMUTABLE_SWR_OPTIONS`): the same key always holds the same bytes.
  */
-function readyKey(repo: Repository | undefined, ...parts: string[]) {
-  return repo?.indexedCommit ? [...parts, repo.id, repo.lastAnalyzedAt ?? ''] : null
-}
 
 /** The stored file list (metadata only). One request feeds both the file tree and the overview's numbers. */
 export function useFileSummaries(repo: Repository | undefined) {
-  return useSWR(readyKey(repo, 'files'), () => getFileSummaries(repo!.id))
+  return useSWR(readyKey(repo, 'files'), () => getFileSummaries(repo!.id), IMMUTABLE_SWR_OPTIONS)
 }
 
 export function useFileTree(repo: Repository | undefined) {
@@ -63,6 +62,7 @@ export function useRepositoryStats(repo: Repository | undefined) {
 
 export function useFile(repo: Repository | undefined, path: string | null) {
   return useSWR(path ? readyKey(repo, 'file', path) : null, () => getFile(repo!.id, path!), {
+    ...IMMUTABLE_SWR_OPTIONS,
     keepPreviousData: true,
   })
 }
@@ -79,16 +79,12 @@ export function useArchitectureStatus(repo: Repository | undefined) {
   )
 }
 
-/** The key of the stored result: it changes exactly when a new analysis completes, which refetches the graph. */
-const resultKey = (status: AnalysisStatus | undefined, ...parts: string[]) =>
-  status?.has_result ? [...parts, status.analyzed_commit_sha ?? '', status.analyzed_at ?? ''] : null
-
 /** The last completed graph. Stays available (marked stale by the status) while a newer analysis runs or fails. */
 export function useArchitectureGraph(repo: Repository | undefined, status: AnalysisStatus | undefined) {
   return useSWR(
     repo ? resultKey(status, 'architecture-graph', repo.id) : null,
     () => getArchitecture(repo!.id),
-    { keepPreviousData: true },
+    { ...IMMUTABLE_SWR_OPTIONS, keepPreviousData: true },
   )
 }
 
@@ -105,15 +101,12 @@ export function useArchitectureDiagramStatus(repo: Repository | undefined) {
   )
 }
 
-const diagramResultKey = (status: DiagramStatus | undefined, ...parts: string[]) =>
-  status?.has_result ? [...parts, status.generated_commit_sha ?? '', status.generated_at ?? ''] : null
-
 /** The last completed diagram. Stays available (marked stale by the status) while a newer one generates or fails. */
 export function useArchitectureDiagram(repo: Repository | undefined, status: DiagramStatus | undefined) {
   return useSWR(
     repo ? diagramResultKey(status, 'architecture-diagram', repo.id) : null,
     () => getArchitectureDiagram(repo!.id),
-    { keepPreviousData: true },
+    { ...IMMUTABLE_SWR_OPTIONS, keepPreviousData: true },
   )
 }
 
@@ -122,7 +115,7 @@ export function useArchitectureNode(repo: Repository | undefined, nodeId: string
   return useSWR(
     repo && nodeId ? resultKey(status, 'architecture-node', repo.id, nodeId) : null,
     () => getArchitectureNode(repo!.id, nodeId!),
-    { shouldRetryOnError: false }, // a 404 (a file the analysis does not cover) is permanent
+    { ...IMMUTABLE_SWR_OPTIONS, shouldRetryOnError: false }, // a 404 (a file the analysis does not cover) is permanent
   )
 }
 
@@ -131,7 +124,8 @@ export function useConversations(repoId: string, enabled = true) {
   return useSWR(enabled ? ['conversations', repoId] : null, () => listConversations(repoId))
 }
 
-/** Embedding-index readiness; only informs the UI, chatting works without it (keyword fallback). */
+/** Embedding-index readiness; only informs the UI, chatting works without it (keyword fallback). Mutable (the
+ * index is built in the background), so it keeps SWR's default revalidation despite the snapshot key. */
 export function useSearchIndex(repo: Repository | undefined, { poll = true }: { poll?: boolean } = {}) {
   return useSWR(readyKey(repo, 'search-index'), () => getSearchIndex(repo!.id), {
     refreshInterval: (data) => (poll && (data?.semantic === 'partial' || data?.semantic === 'not_built') ? 15_000 : 0),

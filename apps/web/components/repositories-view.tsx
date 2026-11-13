@@ -8,6 +8,7 @@ import { IndexBadge } from '@/components/index-badge'
 import { IndexingStatus } from '@/components/indexing-status'
 import { PageHeader, PageShell } from '@/components/page-shell'
 import { RemoveRepositoryDialog } from '@/components/remove-repository-dialog'
+import { SlowStartHint } from '@/components/slow-start-hint'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { describeIngestionError, startIngestion } from '@/lib/api/client'
@@ -105,17 +106,20 @@ export function RepositoriesView() {
       )}
 
       {isLoading ? (
-        <ul className="divide-y divide-border rounded-lg border border-border bg-card" aria-busy="true" aria-label="Loading repositories">
-          {Array.from({ length: 4 }, (_, i) => (
-            <li key={i} className="flex items-center justify-between gap-4 px-4 py-3.5">
-              <div className="flex flex-col gap-2">
-                <Skeleton className="h-4 w-48" />
-                <Skeleton className="h-3 w-64" />
-              </div>
-              <Skeleton className="h-7 w-40" />
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="divide-y divide-border rounded-lg border border-border bg-card" aria-busy="true" aria-label="Loading repositories">
+            {Array.from({ length: 4 }, (_, i) => (
+              <li key={i} className="flex items-center justify-between gap-4 px-4 py-3.5">
+                <div className="flex flex-col gap-2">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-64" />
+                </div>
+                <Skeleton className="h-7 w-40" />
+              </li>
+            ))}
+          </ul>
+          <SlowStartHint />
+        </>
       ) : error && !data ? (
         <div role="alert" className="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-destructive">{error instanceof Error ? error.message : 'Could not load repositories.'}</p>

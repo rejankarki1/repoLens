@@ -1,6 +1,6 @@
 # RepoLens release baseline
 
-A record of what RepoLens is, how it was verified, and what is left. It describes an application with GitHub sign-in, per-user workspaces and usage limits, running locally. It is not deployed and it is not production-ready. Updated for Phase 2 (authentication and security); the Milestone 0 and 1 results it replaces are in Git history and in [verification-m1.md](verification-m1.md).
+A record of what RepoLens was and how it was verified on 2026-11-01, before the first deployment: an application with GitHub sign-in, per-user workspaces and usage limits, running locally. It has since been deployed (see [deployment.md](deployment.md)) and the Architecture tab now shows the AI-generated diagram ([architecture-diagram.md](architecture-diagram.md)); the figures below are not updated. Updated for Phase 2 (authentication and security); the Milestone 0 and 1 results it replaces are in Git history and in [verification-m1.md](verification-m1.md).
 
 ## What exists
 
@@ -15,7 +15,7 @@ RepoLens ingests a public GitHub repository, indexes its code, answers questions
 | Chat | Source-grounded Ask AI with saved conversation history: automatic titles, rename, delete, and clear history per repository. |
 | Citation previews | Clicking a citation opens the cited file with the lines highlighted, beside the chat on wide screens and in a drawer on narrow ones, with a link to the full Code Explorer. |
 | Code Explorer | File tree, source viewer, line deep links, and a per-file Dependencies panel (what the file imports and what imports it). |
-| Architecture Explorer | A deterministic, evidence-linked dependency graph of modules and files with filters, search, and drill-down. Every edge links to the import statement behind it. Technologies and architecture areas are inferred and labelled as such. No AI provider is involved. |
+| Architecture Explorer | At the time: a deterministic, evidence-linked dependency graph of modules and files with filters, search, and drill-down. Every edge links to the import statement behind it. Technologies and architecture areas are inferred and labelled as such. No AI provider is involved. (The tab has since been replaced by the AI-identified diagram; the deterministic analysis still runs and feeds the Overview tab and the per-file Dependencies panel.) |
 | Overview | Real file, directory, line and language statistics and a summary of the stored architecture analysis. |
 | Authentication | GitHub OAuth (authorization code with PKCE, no scope), server-side sessions in HttpOnly cookies, CSRF protection, logout. See [auth-design.md](auth-design.md). |
 | Workspaces and ownership | Each user has a private workspace of repositories and private conversations; repository data is shared between users of the same public repository. Every endpoint checks membership or ownership. |
@@ -110,7 +110,7 @@ About 45 further tuning settings (timeouts, size limits, retrieval and retry par
 - **Quotas are per account.** Anyone can create many GitHub accounts; the global daily AI budget and concurrency limit bound the total cost, but there is no CAPTCHA, email check or account-age rule. See [security.md](security.md).
 - **No account deletion or data export** flow yet (database deletes cascade).
 - **Shared repository snapshots.** A re-ingestion by any member refreshes the snapshot for everyone who added that repository.
-- **Not deployed.** There is no hosting, HTTPS termination, secrets management, backup or monitoring yet; the operator checklist is in [security.md](security.md). The web app and API must be deployed same-site.
+- **Not deployed** at the time of this record. The hosting that followed (Vercel + Render + Neon + Redis, same-site through a rewrite) is described in [deployment.md](deployment.md); the operator checklist is in [security.md](security.md).
 - **Web security headers** (CSP, frame ancestors) for the Next.js app are not configured; the API sends its own.
 - **Manual grammar step.** Tree-sitter grammars must be downloaded once with `ensure_grammars()`. The worker only warns if they are missing, and without them files are indexed as text and architecture analysis cannot read imports.
 - **Language coverage.** Structure-aware chunking and the import graph cover Python, JavaScript, TypeScript and TSX only. Dynamic imports and runtime wiring are not resolved. Architecture areas and technologies are heuristic and marked "Inferred".

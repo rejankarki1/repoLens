@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { GuestDashboard } from '@/components/guest-dashboard'
 import { MemberDashboard } from '@/components/member-dashboard'
 import { PageShell } from '@/components/page-shell'
+import { SlowStartHint } from '@/components/slow-start-hint'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRepositories } from '@/lib/api/hooks'
 import { useAuth } from '@/lib/auth/use-auth'
@@ -17,6 +18,7 @@ function DashboardSkeleton() {
         <Skeleton className="h-52 rounded-lg" />
         <Skeleton className="h-52 rounded-lg" />
       </div>
+      <SlowStartHint />
     </PageShell>
   )
 }

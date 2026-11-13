@@ -22,7 +22,7 @@ from sqlalchemy.orm import defer
 from apps.api.config import Settings, get_settings
 from apps.api.models.entities import ArchitectureAnalysis, Repository, SourceFile
 from apps.api.schemas.architecture import (
-    AnalysisStatus, Cycle, FileExternal, Graph, GraphEdge, GraphNode, NodeDetailResponse, UnresolvedImport,
+    AnalysisStatus, FileExternal, Graph, GraphEdge, GraphNode, NodeDetailResponse, UnresolvedImport,
 )
 from apps.api.services.architecture.build import ANALYZER_VERSION, SnapshotFile, analyze_snapshot, wanted_content
 

@@ -137,6 +137,8 @@ DATABASE_URL='postgresql://…neon…?sslmode=require' REDIS_URL='redis://127.0.
 
 ## Limitations and unverified assumptions
 
+Written before the first deployment. The public demo (<https://repo-lens-bice.vercel.app>) has since run on this setup with real imported repositories; the measurements below are from the local rehearsal and were not repeated on the hosts.
+
 - **Verified locally** (Docker, throwaway Postgres+pgvector and Redis): the image builds; migrations run on an empty pgvector database; `/health` and `/health/ready` respond; two real ingestions (itsdangerous, flask: 223 files) completed with API + worker under a hard 512 MB limit, peak ≈ 200 MiB, no OOM kill; `docker stop` stops both processes in ~1 s with exit 0; a dying child takes the service down visibly. The Next.js rewrite was checked with `next start` against a stub: redirects, `Set-Cookie` and an SSE stream pass through incrementally.
 - **Not verified** (needs your accounts): real Neon/Redis connections and TLS, real GitHub OAuth through the Vercel rewrite, Gemini/Groq calls, and Ask AI streaming through *Vercel's* proxy (only `next start` was tested). Vercel may limit how long a proxied response may stay open; if long answers are cut, the fallback is calling Render directly, which then needs the cross-site cookie design this deployment avoids.
 - **Memory**: idle ≈ 176 MB; ingestion peak ≈ 200 MiB for a 223-file repository. Embedding builds and diagram generation were not measured (no provider keys). A large repository (`GITHUB_ARCHIVE_MAX_BYTES` caps archives at 10 MB here) is the likeliest way to exceed 512 MB. The combined setup is best-effort.

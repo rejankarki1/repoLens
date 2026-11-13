@@ -13,7 +13,6 @@ from apps.api.models.entities import AuthSession, GitHubAccount, User
 from apps.api.services.sessions import resolve_session
 
 CSRF_HEADER = "X-CSRF-Token"
-SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 def settings_dep() -> Settings:

@@ -2,6 +2,7 @@
 
 import { ArrowRight, ListChecks, MessageSquareText, RefreshCw, ScanSearch } from 'lucide-react'
 import { RepositoryCard } from '@/components/repository-card'
+import { SlowStartHint } from '@/components/slow-start-hint'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRepositories } from '@/lib/api/hooks'
@@ -16,15 +17,18 @@ export function RepositoryList({ limit }: { limit?: number }) {
 
   if (isLoading) {
     return (
-      <ul className="grid gap-3 md:grid-cols-2" aria-busy="true" aria-label="Loading repositories">
-        {Array.from({ length: 4 }, (_, i) => (
-          <li key={i} className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
-            <Skeleton className="h-4 w-40" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-6 w-48" />
-          </li>
-        ))}
-      </ul>
+      <>
+        <ul className="grid gap-3 md:grid-cols-2" aria-busy="true" aria-label="Loading repositories">
+          {Array.from({ length: 4 }, (_, i) => (
+            <li key={i} className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-6 w-48" />
+            </li>
+          ))}
+        </ul>
+        <SlowStartHint />
+      </>
     )
   }
 

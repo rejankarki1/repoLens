@@ -102,6 +102,28 @@ function highlightMarkdown(source: string): Token[] {
   })
 }
 
+/**
+ * Above either limit a file is shown as plain text: the tokenizers are linear, but every token becomes a DOM
+ * element, and a very large file would spend seconds building tens of thousands of spans for no readable gain.
+ * Plain text still renders one row per line, so line numbers, highlighted ranges and citation links keep working.
+ * (The API stores files up to 1 MiB; a minified bundle can be one line of several hundred thousand characters.)
+ */
+export const MAX_HIGHLIGHT_CHARS = 250_000
+export const MAX_HIGHLIGHT_LINES = 5_000
+
+/** Whether `source` is small enough to syntax-highlight. `lineCount` saves a scan when the caller already knows it. */
+export function shouldHighlight(source: string, lineCount?: number): boolean {
+  if (source.length > MAX_HIGHLIGHT_CHARS) return false
+  const lines = lineCount ?? countLines(source)
+  return lines <= MAX_HIGHLIGHT_LINES
+}
+
+function countLines(source: string): number {
+  let count = 1
+  for (let i = source.indexOf('\n'); i !== -1; i = source.indexOf('\n', i + 1)) count++
+  return count
+}
+
 /** Highlight source and split it into per-line token arrays. */
 export function highlightLines(source: string, language: CodeLanguage): Token[][] {
   let tokens: Token[]
