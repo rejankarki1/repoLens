@@ -26,11 +26,11 @@ Visitors can browse an allow-listed set of showcase repositories read-only. Sign
 
 ## Screenshots
 
-Captured from the live demo on the Wanderlust repository.
+Captured from the live demo on the Wanderlust repository. The architecture diagram is shown in full, scaled to fit; click it for the full-resolution image.
 
 | Code Explorer | Architecture Explorer |
 | --- | --- |
-| ![Code Explorer: a file tree, the listings controller with a highlighted line range, and a panel listing the file's imports and importers](docs/images/code-explorer.png) | ![Architecture Explorer: an AI-identified component diagram of Wanderlust with verified and inferred relationships and a minimap](docs/images/architecture-explorer.png) |
+| ![Code Explorer: a file tree, the listings controller with a highlighted line range, and a panel listing the file's imports and importers](docs/images/code-explorer.png) | [![The complete Architecture Explorer diagram of Wanderlust scaled to fit: five groups covering frontend pages and components, backend controllers, data models and external services, with verified and inferred relationships](docs/images/architecture-explorer.png)](docs/images/architecture-explorer-full.png) |
 
 ![Ask AI answering "Where is the entry point?" with numbered source tags, and the cited lines of backend/server.js beside it](docs/images/ask-ai.png)
 
