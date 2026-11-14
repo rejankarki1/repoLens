@@ -18,9 +18,10 @@ const STEPS = [
 const FEATURES = [
   {
     image: '/landing/architecture.png',
-    alt: 'The Architecture Explorer showing the Wanderlust repository as a diagram: boxes for the frontend pages and components and the backend controllers and API, joined by solid arrows for verified imports and dashed arrows for inferred relationships, with a minimap in the corner.',
+    full: '/landing/architecture-full.png',
+    alt: 'The complete Architecture Explorer diagram of the Wanderlust repository, scaled to fit: five groups (frontend views and pages, frontend components and shell, backend controllers and API, data models and storage, and external services including Cloudinary, MongoDB Atlas and a Passport auth provider) with solid arrows for verified imports and dashed arrows for inferred relationships, each labelled.',
     title: 'See how the pieces connect',
-    text: 'An AI-identified diagram of a repository’s components. Pan and zoom, or select a component to see the real files behind it.',
+    text: 'An AI-identified diagram of a repository’s components. Pan and zoom, or select a component to see the real files behind it. Click the image to open the full-size diagram.',
     repo: 'rejankarki1/wanderlust',
     suffix: '/graph',
     link: 'Open this diagram',
@@ -104,10 +105,23 @@ export default function Home() {
             <p className="max-w-2xl text-muted-foreground">Ask AI shows its sources. Two more views let you follow them.</p>
           </div>
           <div className="grid gap-6 md:grid-cols-2">
-            {FEATURES.map(({ image, alt, title, text, repo, suffix, link }) => (
+            {FEATURES.map(({ image, full, alt, title, text, repo, suffix, link }) => (
               <figure key={title} className="flex flex-col gap-4">
                 <div className="overflow-hidden rounded-xl border border-border bg-card shadow-md">
-                  <Image src={image} alt={alt} width={1200} height={900} className="h-auto w-full" />
+                  {full ? (
+                    <a
+                      href={full}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Open the full-size diagram"
+                      aria-label="Open the full-size diagram in a new tab"
+                      className="block focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+                    >
+                      <Image src={image} alt={alt} width={1200} height={900} className="h-auto w-full" />
+                    </a>
+                  ) : (
+                    <Image src={image} alt={alt} width={1200} height={900} className="h-auto w-full" />
+                  )}
                 </div>
                 <figcaption className="flex flex-col gap-1.5">
                   <h3 className="font-medium">{title}</h3>
