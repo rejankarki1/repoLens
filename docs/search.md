@@ -85,3 +85,17 @@ missing key is **not** an error: the response is keyword-only, with an entry in 
   `POST /repositories/{id}/embeddings` for repositories ingested earlier.
 * After a hard worker crash (`kill -9`), RQ keeps its scheduler lock for about a minute, and a worker
   restarted inside that window runs without a scheduler (retries wait). Restart it again after a minute.
+
+## From repository to index (ingestion)
+
+How a repository's code gets into the index that the search above reads. State lives in PostgreSQL (`queued → in_progress → completed | failed`); see `apps/api/services/ingestion.py` for the state machine.
+
+1. **Validate and queue.** `POST /repositories` checks the URL (GitHub only, `owner/name` rules, no credentials or ports) and creates the repository row, or adds the user to the stored copy if someone already imported it. The web app then requests an ingestion (`POST /repositories/{id}/ingestions`), which answers 409 while one is already queued or running.
+2. **Download.** The worker resolves the default branch to a commit and streams the zipball to a temporary file. An archive over `GITHUB_ARCHIVE_MAX_BYTES` is rejected (25 MiB by default, 10 MiB on the hosted demo).
+3. **Read safely.** Entries are filtered as they are read: dependency directories, lockfiles, minified bundles, source maps, binaries, Git LFS pointers, files that look generated and files that look like credentials are skipped. At most 5,000 files, 1 MiB per file and 50 MiB in total are accepted (`ARCHIVE_READER_*`); a repository that exceeds a limit is stored partially and flagged `ingestion_truncated`, which the UI shows.
+4. **Store the snapshot** in one transaction, tagged with the commit SHA. A re-ingestion replaces the snapshot only on success; a failure keeps the previous one, which the UI keeps serving.
+5. **Chunk.** Python, JavaScript, TypeScript and TSX are parsed with tree-sitter into chunks of up to 1,500 bytes that follow the code's structure and record symbol names, line ranges and byte offsets. Other text files are chunked as plain text.
+6. **Index.** Each chunk gets the weighted keyword vector described above. If `GEMINI_API_KEY` is set, an embedding job is queued (see "Embeddings"): up to `EMBEDDING_MAX_CHUNKS_PER_REPOSITORY` chunks are embedded (10,000 by default, 3,000 on the hosted demo) and the rest stay keyword-searchable.
+7. **Analyze.** A deterministic import analysis is queued ([architecture.md](architecture.md)); up to `ARCHITECTURE_MAX_FILES` (5,000) code files are analyzed.
+
+Jobs retry once for transient failures, refresh a heartbeat while running, and a stale-job sweeper recovers work lost to a crashed or sleeping worker.

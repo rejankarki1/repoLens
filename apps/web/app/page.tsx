@@ -18,7 +18,7 @@ const STEPS = [
 const FEATURES = [
   {
     image: '/landing/architecture.png',
-    alt: 'The Architecture Explorer showing the Wanderlust repository as a diagram: a frontend application, a backend API with its routes, a database and Cloudinary, joined by arrows.',
+    alt: 'The Architecture Explorer showing the Wanderlust repository as a diagram: boxes for the frontend pages and components and the backend controllers and API, joined by solid arrows for verified imports and dashed arrows for inferred relationships, with a minimap in the corner.',
     title: 'See how the pieces connect',
     text: 'An AI-identified diagram of a repository’s components. Pan and zoom, or select a component to see the real files behind it.',
     repo: 'rejankarki1/wanderlust',
