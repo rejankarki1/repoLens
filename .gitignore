@@ -71,3 +71,6 @@ Thumbs.db
 # Local dev stack state (pid files, logs)
 .dev/
 .neon
+
+# Local benchmark and evaluation artifacts (reports, logs, vector caches): never committed
+benchmarks/
